@@ -736,14 +736,13 @@ h2 {
   }
   .workspace-tabs {
     height: 54px;
-    scroll-snap-type: x proximity;
-    scroll-padding-inline: 16px;
+    scroll-snap-type: none;
+    scroll-padding-inline: 0;
     -webkit-overflow-scrolling: touch;
   }
   .workspace-tab-item {
     width: 170px;
     min-width: 170px;
-    scroll-snap-align: start;
   }
   .workspace-tab {
     padding-left: 14px;
@@ -751,7 +750,7 @@ h2 {
   .terminal-grid {
     min-height: 430px;
     overflow-x: auto;
-    scroll-snap-type: x mandatory;
+    scroll-snap-type: none;
     scroll-padding-inline: 0;
     scrollbar-width: none;
     -webkit-overflow-scrolling: touch;
@@ -761,10 +760,9 @@ h2 {
     display: none;
   }
   .terminal-pane {
-    min-width: 100%;
+    min-width: 280px;
     min-height: 0;
-    flex-basis: 100%;
-    scroll-snap-align: start;
+    flex-basis: 280px;
   }
   .pane-header {
     min-height: 62px;

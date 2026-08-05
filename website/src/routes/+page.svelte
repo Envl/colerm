@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { onMount } from 'svelte'
   import TerminalPane from '$lib/TerminalPane.svelte'
 
   type Pane = {
@@ -268,6 +269,10 @@
       })
     })
   }
+
+  onMount(() => {
+    requestAnimationFrame(() => selectPane(FIRST_PANE_ID))
+  })
 </script>
 
 <svelte:head>
