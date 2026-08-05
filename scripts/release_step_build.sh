@@ -32,8 +32,20 @@ while [[ $# -gt 0 ]]; do
 done
 
 case "$CONFIGURATION" in
-  Debug) SWIFT_CONFIGURATION="debug" ;;
-  Release) SWIFT_CONFIGURATION="release" ;;
+  Debug)
+    SWIFT_CONFIGURATION="debug"
+    APP="$ROOT/dist/Colerm Debug.app"
+    DISPLAY_NAME="Colerm Debug"
+    BUNDLE_ID="com.colerm.app.debug"
+    EXECUTABLE_NAME="ColermDebug"
+    ;;
+  Release)
+    SWIFT_CONFIGURATION="release"
+    APP="$ROOT/dist/Colerm.app"
+    DISPLAY_NAME="Colerm"
+    BUNDLE_ID="com.colerm.app"
+    EXECUTABLE_NAME="ColermApp"
+    ;;
   *) echo "Unsupported configuration: $CONFIGURATION" >&2; exit 2 ;;
 esac
 
@@ -60,10 +72,15 @@ else
   swift build -c "$SWIFT_CONFIGURATION"
   BIN="$ROOT/.build/$SWIFT_CONFIGURATION/ColermApp"
 fi
-APP="$ROOT/dist/Colerm.app"
-
 mkdir -p "$ROOT/dist"
-BUILD_ARGS=(--bin "$BIN" --out-app "$APP" --version "$VERSION")
+BUILD_ARGS=(
+  --bin "$BIN"
+  --out-app "$APP"
+  --version "$VERSION"
+  --display-name "$DISPLAY_NAME"
+  --bundle-id "$BUNDLE_ID"
+  --executable-name "$EXECUTABLE_NAME"
+)
 if [[ -n "$SIGN_IDENTITY" ]]; then
   BUILD_ARGS+=(--sign "$SIGN_IDENTITY")
 fi

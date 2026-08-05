@@ -8,9 +8,9 @@ VERSION="$(xargs < "$ROOT/VERSION")"
   --configuration Debug \
   --version "$VERSION"
 
-/usr/bin/pkill -x ColermApp 2>/dev/null || true
-while /usr/bin/pgrep -x ColermApp >/dev/null; do
+/usr/bin/pkill -x ColermDebug 2>/dev/null || true
+while /usr/bin/pgrep -x ColermDebug >/dev/null; do
   sleep 0.1
 done
 
-open -n "$ROOT/dist/Colerm.app"
+open -n "$ROOT/dist/Colerm Debug.app"

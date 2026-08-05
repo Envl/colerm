@@ -4,6 +4,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 EXECUTABLE_NAME="ColermApp"
 BUNDLE_ID="com.colerm.app"
+DISPLAY_NAME="Colerm"
 BIN=""
 OUT_APP=""
 VERSION=""
@@ -18,6 +19,9 @@ Options:
   --out-app <path>   Destination .app bundle
   --version <value>  Bundle version (default: VERSION)
   --sign <identity>  Developer ID identity; omit for ad-hoc signing
+  --executable-name <name>  Executable name inside the bundle
+  --bundle-id <identifier>  Bundle identifier (default: com.colerm.app)
+  --display-name <name>     Finder and Dock name (default: Colerm)
   --help             Show this help
 EOF
 }
@@ -28,6 +32,9 @@ while [[ $# -gt 0 ]]; do
     --out-app) OUT_APP="${2:?missing value for --out-app}"; shift 2 ;;
     --version) VERSION="${2:?missing value for --version}"; shift 2 ;;
     --sign) SIGN_IDENTITY="${2:?missing value for --sign}"; shift 2 ;;
+    --executable-name) EXECUTABLE_NAME="${2:?missing value for --executable-name}"; shift 2 ;;
+    --bundle-id) BUNDLE_ID="${2:?missing value for --bundle-id}"; shift 2 ;;
+    --display-name) DISPLAY_NAME="${2:?missing value for --display-name}"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
     *) echo "Unknown argument: $1" >&2; usage >&2; exit 2 ;;
   esac
@@ -95,11 +102,11 @@ fi
   printf '%s\n' '<?xml version="1.0" encoding="UTF-8"?>'
   printf '%s\n' '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">'
   printf '%s\n' '<plist version="1.0">' '<dict>'
-  printf '%s\n' '  <key>CFBundleDisplayName</key>' '  <string>Colerm</string>'
+  printf '%s\n' '  <key>CFBundleDisplayName</key>' "  <string>$DISPLAY_NAME</string>"
   printf '%s\n' '  <key>CFBundleExecutable</key>' "  <string>$EXECUTABLE_NAME</string>"
   printf '%s\n' '  <key>CFBundleIconFile</key>' '  <string>Colerm.icns</string>'
   printf '%s\n' '  <key>CFBundleIdentifier</key>' "  <string>$BUNDLE_ID</string>"
-  printf '%s\n' '  <key>CFBundleName</key>' '  <string>Colerm</string>'
+  printf '%s\n' '  <key>CFBundleName</key>' "  <string>$DISPLAY_NAME</string>"
   printf '%s\n' '  <key>CFBundlePackageType</key>' '  <string>APPL</string>'
   printf '%s\n' '  <key>CFBundleShortVersionString</key>' "  <string>$VERSION</string>"
   printf '%s\n' '  <key>CFBundleVersion</key>' "  <string>$VERSION</string>"
