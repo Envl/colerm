@@ -119,9 +119,7 @@
   class="terminal-pane"
   style={`--pane-accent: ${accent}`}
   id={`terminal-${id}`}
-  onfocusin={event => {
-    if (event.isTrusted) onActivate?.()
-  }}
+  onpointerdown={() => onActivate?.()}
 >
   <header class="pane-header">
     <div class="pane-title">
