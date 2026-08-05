@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { dev } from '$app/environment'
   import { onMount } from 'svelte'
   import TerminalPane from '$lib/TerminalPane.svelte'
 
@@ -276,7 +277,7 @@
 </script>
 
 <svelte:head>
-  <title>Colerm — terminals, in focus</title>
+  <title>{dev ? '[dev] - ' : ''}Colerm — terminals, in focus</title>
   <meta name="theme-color" content="#090909" />
   <meta name="description" content="Colerm keeps terminal sessions side by side, so your work stays in view." />
   <meta name="author" content="Colerm" />
