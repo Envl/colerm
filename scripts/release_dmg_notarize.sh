@@ -6,6 +6,7 @@ NOTARY_PROFILE=""
 SIGN_IDENTITY=""
 UNIVERSAL=true
 VERSION=""
+BUILD_NUMBER=""
 
 usage() {
   cat <<EOF
@@ -15,6 +16,7 @@ Options:
   --sign <identity>          Sign the app before packaging
   --notary-profile <name>    Notarize and staple the app and final DMG
   --version <value>          Bundle version (default: VERSION)
+  --build-number <value>     Numeric bundle build
   --native                    Build only for the host architecture
   --help                     Show this help
 EOF
@@ -25,6 +27,7 @@ while [[ $# -gt 0 ]]; do
     --sign) SIGN_IDENTITY="${2:?}"; shift 2 ;;
     --notary-profile) NOTARY_PROFILE="${2:?}"; shift 2 ;;
     --version) VERSION="${2:?}"; shift 2 ;;
+    --build-number) BUILD_NUMBER="${2:?}"; shift 2 ;;
     --native) UNIVERSAL=false; shift ;;
     -h|--help) usage; exit 0 ;;
     *) echo "Unknown argument: $1" >&2; usage >&2; exit 2 ;;
@@ -35,12 +38,18 @@ BUILD_ARGS=()
 if [[ -n "$SIGN_IDENTITY" ]]; then BUILD_ARGS+=(--sign "$SIGN_IDENTITY"); fi
 if [[ "$UNIVERSAL" == true ]]; then BUILD_ARGS+=(--universal); fi
 if [[ -n "$VERSION" ]]; then BUILD_ARGS+=(--version "$VERSION"); fi
+if [[ -n "$BUILD_NUMBER" ]]; then BUILD_ARGS+=(--build-number "$BUILD_NUMBER"); fi
 "$ROOT/scripts/release_step_build.sh" "${BUILD_ARGS[@]}"
 
 APP="$ROOT/dist/Colerm.app"
 if [[ -n "$NOTARY_PROFILE" ]]; then
   "$ROOT/scripts/release_step_notarize.sh" --app "$APP" --notary-profile "$NOTARY_PROFILE"
 fi
+
+ARCHIVE_VERSION="${VERSION:-$(xargs < "$ROOT/VERSION")}"
+UPDATE_ARCHIVE="$ROOT/dist/Colerm-$ARCHIVE_VERSION.zip"
+rm -f "$UPDATE_ARCHIVE"
+ditto -c -k --sequesterRsrc --keepParent "$APP" "$UPDATE_ARCHIVE"
 
 "$ROOT/scripts/release_step_package.sh" --app "$APP"
 

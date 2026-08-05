@@ -19,6 +19,7 @@ jobs:
       KEYCHAIN_PASSWORD: ${{ secrets.MACOS_KEYCHAIN_PASSWORD }}
       CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
       NOTARY_PROFILE: colerm-notary
+      PUBLISH_UPDATER_ASSETS: ${{ vars.SPARKLE_UPDATES_ENABLED == 'true' }}
     steps:
       - name: Check out source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -95,28 +96,49 @@ jobs:
             --password "$APPLE_APP_SPECIFIC_PASSWORD"
 
       - name: Build, notarize, and package release DMG
-        run: ./scripts/release_dmg_notarize.sh --version "$VERSION" --sign "$SIGN_IDENTITY" --notary-profile "$NOTARY_PROFILE"
+        run: ./scripts/release_dmg_notarize.sh --version "$VERSION" --build-number "$GITHUB_RUN_NUMBER" --sign "$SIGN_IDENTITY" --notary-profile "$NOTARY_PROFILE"
+
+      - name: Generate signed update feed
+        if: ${{ env.PUBLISH_UPDATER_ASSETS == 'true' }}
+        env:
+          SPARKLE_ED_PRIVATE_KEY: ${{ secrets.SPARKLE_ED_PRIVATE_KEY }}
+        run: |
+          ./scripts/release_step_appcast.sh \
+            --version "$VERSION" \
+            --tag "$GITHUB_REF_NAME" \
+            --repository "$GITHUB_REPOSITORY"
 
       - name: Create checksums
-        run: (cd dist && shasum -a 256 Colerm.dmg > Colerm.dmg.sha256)
+        run: |
+          cd dist
+          shasum -a 256 Colerm.dmg > Colerm.dmg.sha256
+          if [[ "$PUBLISH_UPDATER_ASSETS" == "true" ]]; then
+            shasum -a 256 "Colerm-$VERSION.zip" > "Colerm-$VERSION.zip.sha256"
+          fi
 
       - name: Publish GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          assets=(dist/Colerm.dmg dist/Colerm.dmg.sha256)
+          if [[ "$PUBLISH_UPDATER_ASSETS" == "true" ]]; then
+            assets+=(
+              "dist/Colerm-$VERSION.zip"
+              "dist/Colerm-$VERSION.zip.sha256"
+              dist/appcast.xml
+            )
+          fi
           if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             gh release upload "$GITHUB_REF_NAME" \
               --repo "$GITHUB_REPOSITORY" \
               --clobber \
-              dist/Colerm.dmg \
-              dist/Colerm.dmg.sha256
+              "${assets[@]}"
           else
             gh release create "$GITHUB_REF_NAME" \
               --repo "$GITHUB_REPOSITORY" \
               --title "Colerm $VERSION" \
               --generate-notes \
-              dist/Colerm.dmg \
-              dist/Colerm.dmg.sha256
+              "${assets[@]}"
           fi
 
       - name: Remove signing keychain

@@ -71,15 +71,16 @@ restoring live processes.
 ## Releases
 
 Push a protected `v*` tag to build, sign, notarize, and publish the universal
-DMG through GitHub Actions:
+DMG and Sparkle update through GitHub Actions:
 
 ```bash
 git tag v0.1.0
 git push origin v0.1.0
 ```
 
-The release workflow publishes a stable `Colerm.dmg` asset, so the website can
-always link to the latest published release without a versioned URL. Configure
+The release workflow publishes the stable `Colerm.dmg`, a versioned signed app
+archive, and `appcast.xml`. The website can always link to the latest DMG, and
+installed release builds use the latest appcast for in-app updates. Configure
 the `release` GitHub Environment with these secrets before publishing:
 
 - `MACOS_CERTIFICATE_P12_BASE64`
@@ -88,6 +89,16 @@ the `release` GitHub Environment with these secrets before publishing:
 - `APPLE_ID`
 - `APPLE_TEAM_ID`
 - `APPLE_APP_SPECIFIC_PASSWORD`
+- `SPARKLE_ED_PRIVATE_KEY`
+
+The Sparkle public key is checked into `Resources/SparklePublicKey`; its private
+counterpart exists only in the GitHub Actions secret and the release operator's
+Keychain. Debug builds embed Sparkle for link compatibility but do not start the
+production updater or expose its menu command.
+
+Updater archives and the appcast are published when the repository Actions
+variable `SPARKLE_UPDATES_ENABLED` is `true`. Leave it disabled for the initial
+release, then enable it before publishing the first newer version.
 
 ## Website development
 

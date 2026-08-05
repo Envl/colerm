@@ -1,4 +1,5 @@
 import AppKit
+import Sparkle
 
 @MainActor
 final class ColermApplication: NSObject, NSApplicationDelegate {
@@ -8,6 +9,8 @@ final class ColermApplication: NSObject, NSApplicationDelegate {
     private var shortcutSettings: KeyboardShortcutSettings?
     private var shortcutMonitor: AppShortcutMonitor?
     private var commandRouter: WorkspaceCommandRouter?
+    private var updaterController: SPUStandardUpdaterController?
+    private var updateAvailabilityObserver: UpdateAvailabilityObserver?
 
     func applicationDidFinishLaunching(_: Notification) {
         NSApp.setActivationPolicy(.regular)
@@ -15,6 +18,7 @@ final class ColermApplication: NSObject, NSApplicationDelegate {
         let shortcutSettings = KeyboardShortcutSettings()
         let settingsWindowController = SettingsWindowController(settings: shortcutSettings)
         var openCommandPalette: (() -> Void)?
+        var installUpdate: (() -> Void)?
         let windowController = ColermWindowController(
             shortcutSettings: shortcutSettings,
             onOpenSettings: { [weak settingsWindowController] in
@@ -22,6 +26,9 @@ final class ColermApplication: NSObject, NSApplicationDelegate {
             },
             onOpenCommandPalette: {
                 openCommandPalette?()
+            },
+            onInstallUpdate: {
+                installUpdate?()
             }
         )
         let workspace = windowController.workspaceController
@@ -55,6 +62,28 @@ final class ColermApplication: NSObject, NSApplicationDelegate {
         self.shortcutSettings = shortcutSettings
         self.shortcutMonitor = shortcutMonitor
         self.commandRouter = commandRouter
+
+        let updaterController: SPUStandardUpdaterController?
+        if Bundle.main.bundleIdentifier == "com.colerm.app" {
+            let observer = UpdateAvailabilityObserver()
+            observer.onAvailabilityChanged = { [weak windowController] available in
+                windowController?.setUpdateAvailable(available)
+            }
+            updaterController = SPUStandardUpdaterController(
+                startingUpdater: true,
+                updaterDelegate: observer,
+                userDriverDelegate: nil
+            )
+            updateAvailabilityObserver = observer
+            installUpdate = { [weak updaterController] in
+                updaterController?.checkForUpdates(nil)
+            }
+            updaterController?.updater.checkForUpdateInformation()
+        } else {
+            updaterController = nil
+            installUpdate = {}
+        }
+        self.updaterController = updaterController
 
         NSApp.mainMenu = makeMainMenu(router: commandRouter)
         windowController.showWindow(nil)
