@@ -98,7 +98,7 @@ jobs:
         run: ./scripts/release_dmg_notarize.sh --version "$VERSION" --sign "$SIGN_IDENTITY" --notary-profile "$NOTARY_PROFILE"
 
       - name: Create checksums
-        run: shasum -a 256 dist/Colerm.dmg > dist/Colerm.dmg.sha256
+        run: (cd dist && shasum -a 256 Colerm.dmg > Colerm.dmg.sha256)
 
       - name: Publish GitHub release
         env:
