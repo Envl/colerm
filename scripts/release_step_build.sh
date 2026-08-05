@@ -71,9 +71,11 @@ if [[ "$UNIVERSAL" == true ]]; then
     echo "Universal binary is missing arm64 or x86_64: $ARCH_INFO" >&2
     exit 1
   }
+  SPARKLE_ARTIFACT_ROOT="$ARM64_SCRATCH"
 else
   swift build -c "$SWIFT_CONFIGURATION"
   BIN="$ROOT/.build/$SWIFT_CONFIGURATION/ColermApp"
+  SPARKLE_ARTIFACT_ROOT="$ROOT/.build"
 fi
 mkdir -p "$ROOT/dist"
 BUILD_ARGS=(
@@ -87,7 +89,7 @@ BUILD_ARGS=(
 if [[ -n "$BUILD_NUMBER" ]]; then
   BUILD_ARGS+=(--build-number "$BUILD_NUMBER")
 fi
-SPARKLE_FRAMEWORK="$ROOT/.build/artifacts/sparkle/Sparkle/Sparkle.xcframework/macos-arm64_x86_64/Sparkle.framework"
+SPARKLE_FRAMEWORK="$SPARKLE_ARTIFACT_ROOT/artifacts/sparkle/Sparkle/Sparkle.xcframework/macos-arm64_x86_64/Sparkle.framework"
 [[ -d "$SPARKLE_FRAMEWORK" ]] || {
   echo "Sparkle.framework was not resolved by SwiftPM" >&2
   exit 1
