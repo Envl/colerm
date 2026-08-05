@@ -1,0 +1,28 @@
+.build/
+dist/
+DerivedData/
+*.xcuserstate
+xcuserdata/
+.DS_Store
+
+# A built Ghostty kit is generated locally from the pinned submodule.
+Vendor/ghostty/macos/GhosttyKit.xcframework/
+
+website/node_modules/
+website/dist/
+website/.svelte-kit/
+website/.wrangler/
+website/.dev.vars*
+
+# Local credentials and signing material.
+.env
+.env.*
+!.env.example
+*.dev.vars
+*.dev.vars.*
+*.pem
+*.p12
+*.mobileprovision
+*.provisionprofile
+*.key
+*.cer
