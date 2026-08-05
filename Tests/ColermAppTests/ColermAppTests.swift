@@ -222,6 +222,17 @@ final class ColermAppTests: XCTestCase {
         XCTAssertEqual(persistence.load(), document)
     }
 
+    func testDebugWorkspacePersistenceIsIsolatedFromRelease() {
+        XCTAssertEqual(
+            WorkspacePersistence.supportDirectoryName(bundleIdentifier: "com.colerm.app"),
+            "Colerm"
+        )
+        XCTAssertEqual(
+            WorkspacePersistence.supportDirectoryName(bundleIdentifier: "com.colerm.app.debug"),
+            "Colerm Debug"
+        )
+    }
+
     @MainActor
     func testTerminalSessionDetectsForegroundCommandFromPTYProcess() {
         let engine = ActivityTestEngine()

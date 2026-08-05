@@ -22,7 +22,8 @@ final class ColermWindowController: NSWindowController, NSWindowDelegate {
             backing: .buffered,
             defer: false
         )
-        window.title = "Colerm"
+        window.title = Bundle.main.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String
+            ?? "Colerm"
         window.minSize = NSSize(width: 720, height: 420)
         window.isReleasedWhenClosed = false
         window.contentViewController = workspaceController

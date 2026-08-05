@@ -39,8 +39,15 @@ final class WorkspacePersistence {
             in: .userDomainMask
         ).first ?? fileManager.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support")
         return applicationSupport
-            .appendingPathComponent("Colerm", isDirectory: true)
+            .appendingPathComponent(
+                Self.supportDirectoryName(bundleIdentifier: Bundle.main.bundleIdentifier),
+                isDirectory: true
+            )
             .appendingPathComponent("workspace.json")
+    }
+
+    static func supportDirectoryName(bundleIdentifier: String?) -> String {
+        bundleIdentifier == "com.colerm.app.debug" ? "Colerm Debug" : "Colerm"
     }
 }
 

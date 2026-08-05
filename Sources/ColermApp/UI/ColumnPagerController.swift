@@ -133,7 +133,7 @@ final class ColumnPagerController: NSViewController {
                 let column = TerminalColumnView(
                     session: session,
                     onSelect: { [weak self] in
-                        self?.store.select(sessionID)
+                        self?.selectColumnFromPointer(sessionID)
                     },
                     onNewTerminal: { [weak self] in
                         self?.store.addColumn()
@@ -219,6 +219,19 @@ final class ColumnPagerController: NSViewController {
         lastSelectedSessionID = sessionID
         store.select(sessionID)
         scrollToColumn(at: wrappedIndex)
+    }
+
+    private func selectColumnFromPointer(_ sessionID: TerminalSessionID) {
+        // Pointer selection happens inside the current viewport. Mark it handled
+        // before publishing selection so synchronize() does not recenter it.
+        lastSelectedSessionID = sessionID
+        store.select(sessionID)
+        if let terminalView = columnViews[sessionID]?.terminalSurface,
+           let window = view.window,
+           window.isKeyWindow {
+            window.makeFirstResponder(terminalView)
+        }
+        updateSurfaceVisibility()
     }
 
     private func scrollToSelectedColumn() {
