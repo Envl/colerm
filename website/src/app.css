@@ -738,6 +738,8 @@ h2 {
     height: 54px;
     scroll-snap-type: none;
     scroll-padding-inline: 0;
+    overscroll-behavior-y: none;
+    touch-action: pan-x;
     -webkit-overflow-scrolling: touch;
   }
   .workspace-tab-item {
