@@ -1,0 +1,124 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    runs-on: macos-15
+    environment:
+      name: release
+    permissions:
+      contents: write
+    env:
+      KEYCHAIN_PASSWORD: ${{ secrets.MACOS_KEYCHAIN_PASSWORD }}
+      CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+      NOTARY_PROFILE: colerm-notary
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Select Swift 6 toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcode_path=/Applications/Xcode_16.4.app
+          [[ -d "$xcode_path" ]] || {
+            echo "Expected Xcode 16.4 at $xcode_path" >&2
+            exit 1
+          }
+          sudo xcode-select --switch "$xcode_path"
+          xcodebuild -version
+          swift_version="$(swift --version)"
+          printf '%s\n' "$swift_version"
+          grep -q 'Swift version 6' <<<"$swift_version"
+
+      - name: Validate release version
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]] || {
+            echo "Tag must contain a semantic version after v: $GITHUB_REF_NAME" >&2
+            exit 1
+          }
+          printf 'VERSION=%s\n' "$version" >> "$GITHUB_ENV"
+
+      - name: Import Developer ID certificate
+        shell: bash
+        env:
+          CERTIFICATE_BASE64: ${{ secrets.MACOS_CERTIFICATE_P12_BASE64 }}
+        run: |
+          set -euo pipefail
+          export KEYCHAIN_PATH="$RUNNER_TEMP/colerm-signing.keychain-db"
+          printf 'KEYCHAIN_PATH=%s\n' "$KEYCHAIN_PATH" >> "$GITHUB_ENV"
+          certificate_path="$RUNNER_TEMP/colerm-developer-id.p12"
+          printf '%s' "$CERTIFICATE_BASE64" | base64 --decode > "$certificate_path"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security import "$certificate_path" \
+            -P "$CERTIFICATE_PASSWORD" \
+            -T /usr/bin/codesign \
+            -T /usr/bin/security \
+            -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
+          security set-key-partition-list \
+            -S apple-tool:,apple: \
+            -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH" >/dev/null
+          security list-keychains -d user -s "$KEYCHAIN_PATH" login.keychain-db
+          security default-keychain -s "$KEYCHAIN_PATH"
+          identity="$(security find-identity -v -p codesigning "$KEYCHAIN_PATH" | \
+            sed -n 's/.*"\(Developer ID Application:.*\)".*/\1/p' | head -n 1)"
+          [[ -n "$identity" ]] || {
+            echo "No Developer ID Application identity found" >&2
+            exit 1
+          }
+          printf 'SIGN_IDENTITY=%s\n' "$identity" >> "$GITHUB_ENV"
+
+      - name: Configure notarization credentials
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+        run: |
+          set -euo pipefail
+          xcrun notarytool store-credentials "$NOTARY_PROFILE" \
+            --apple-id "$APPLE_ID" \
+            --team-id "$APPLE_TEAM_ID" \
+            --password "$APPLE_APP_SPECIFIC_PASSWORD"
+
+      - name: Build, notarize, and package release DMG
+        run: ./scripts/release_dmg_notarize.sh --version "$VERSION" --sign "$SIGN_IDENTITY" --notary-profile "$NOTARY_PROFILE"
+
+      - name: Create checksums
+        run: shasum -a 256 dist/Colerm.dmg > dist/Colerm.dmg.sha256
+
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" \
+              --repo "$GITHUB_REPOSITORY" \
+              --clobber \
+              dist/Colerm.dmg \
+              dist/Colerm.dmg.sha256
+          else
+            gh release create "$GITHUB_REF_NAME" \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "Colerm $VERSION" \
+              --generate-notes \
+              dist/Colerm.dmg \
+              dist/Colerm.dmg.sha256
+          fi
+
+      - name: Remove signing keychain
+        if: ${{ always() }}
+        run: security delete-keychain "$KEYCHAIN_PATH" 2>/dev/null || true
