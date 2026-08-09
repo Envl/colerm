@@ -246,11 +246,10 @@ private struct WorkspaceTab: View {
     }
 
     private var projectFolderName: String {
-        let folder = session.metadata.git?.root.lastPathComponent ?? session.cwd?.lastPathComponent
-        if let folder, !folder.isEmpty {
-            return folder
-        }
-        return session.cwd?.path == "/" ? "/" : "New Column"
+        WorkspaceTabTitle.folderName(
+            cwd: session.cwd,
+            gitRoot: session.metadata.git?.root
+        )
     }
 }
 

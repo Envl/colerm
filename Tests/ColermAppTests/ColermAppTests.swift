@@ -4,6 +4,25 @@ import Carbon
 @testable import ColermApp
 
 final class ColermAppTests: XCTestCase {
+    func testWorkspaceTabTitlePrefersCurrentFolderOverGitRoot() {
+        let gitRoot = URL(fileURLWithPath: "/tmp/shell-click")
+        let currentFolder = gitRoot.appendingPathComponent("website")
+
+        XCTAssertEqual(
+            WorkspaceTabTitle.folderName(cwd: currentFolder, gitRoot: gitRoot),
+            "website"
+        )
+        XCTAssertEqual(
+            WorkspaceTabTitle.folderName(cwd: nil, gitRoot: gitRoot),
+            "shell-click"
+        )
+        XCTAssertEqual(
+            WorkspaceTabTitle.folderName(cwd: URL(fileURLWithPath: "/"), gitRoot: gitRoot),
+            "/"
+        )
+        XCTAssertEqual(WorkspaceTabTitle.folderName(cwd: nil, gitRoot: nil), "New Column")
+    }
+
     func testWorkspaceSessionOrderingInsertsAtBoundedPosition() {
         XCTAssertEqual(
             WorkspaceSessionOrdering.inserting("new", into: ["a", "b"], at: 1),

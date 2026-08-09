@@ -107,8 +107,7 @@ GHOSTTY_SHARE="$ROOT/Vendor/ghostty/share"
 if [[ -d "$GHOSTTY_SHARE/ghostty" ]]; then
   cp -R "$GHOSTTY_SHARE/ghostty/." "$APP_RESOURCES/"
 elif [[ -d "$ROOT/Vendor/ghostty/src/shell-integration" ]]; then
-  # Keep the fallback app bundle useful for local inspection even when the
-  # large Ghostty resource generation step has not completed yet.
+  # The shell integration is required for live PWD/title updates.
   mkdir -p "$APP_RESOURCES/shell-integration"
   cp -R "$ROOT/Vendor/ghostty/src/shell-integration/." \
     "$APP_RESOURCES/shell-integration/"
@@ -123,7 +122,11 @@ fi
 # session delegate consumes Colerm-tagged messages instead of notifying users.
 COLERM_METADATA_HOOK="$ROOT/Resources/shell-integration/zsh/colerm-node-metadata.zsh"
 COLERM_GHOSTTY_ZSH="$APP_RESOURCES/shell-integration/zsh/ghostty-integration"
-if [[ -f "$COLERM_METADATA_HOOK" && -f "$COLERM_GHOSTTY_ZSH" ]]; then
+if [[ ! -f "$COLERM_GHOSTTY_ZSH" ]]; then
+  echo "Ghostty zsh shell integration was not packaged: $COLERM_GHOSTTY_ZSH" >&2
+  exit 1
+fi
+if [[ -f "$COLERM_METADATA_HOOK" ]]; then
   {
     printf '%s\n' '' '# Colerm runtime metadata extension.'
     printf '%s\n' 'if [[ -n "${GHOSTTY_RESOURCES_DIR:-}" &&'

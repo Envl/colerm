@@ -4,6 +4,28 @@ import AppKit
 
 typealias TerminalSessionID = UUID
 
+enum WorkspaceTabTitle {
+    static func folderName(cwd: URL?, gitRoot: URL?) -> String {
+        if let name = nonEmptyLastPathComponent(of: cwd) {
+            return name
+        }
+        if let name = nonEmptyLastPathComponent(of: gitRoot) {
+            return name
+        }
+        return "New Column"
+    }
+
+    private static func nonEmptyLastPathComponent(of url: URL?) -> String? {
+        guard let url else { return nil }
+        let standardizedPath = url.standardizedFileURL.path
+        if standardizedPath == "/" {
+            return "/"
+        }
+        let name = url.lastPathComponent
+        return name.isEmpty ? nil : name
+    }
+}
+
 struct GitMetadata: Equatable, Codable {
     var root: URL
     var branch: String
