@@ -5,6 +5,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 VERSION=""
 TAG=""
 REPOSITORY=""
+SPARKLE_TOOLS_DIR="${SPARKLE_TOOLS_DIR:-}"
 
 usage() {
   cat <<EOF
@@ -12,6 +13,9 @@ Usage: $(basename "$0") --version <version> --tag <tag> --repository <owner/repo
 
 Reads the Sparkle private key from SPARKLE_ED_PRIVATE_KEY and writes
 dist/appcast.xml for the versioned update archive in dist/.
+
+Environment:
+  SPARKLE_TOOLS_DIR  Override the directory containing generate_appcast
 EOF
 }
 
@@ -32,9 +36,25 @@ done
 : "${SPARKLE_ED_PRIVATE_KEY:?SPARKLE_ED_PRIVATE_KEY is required}"
 
 ARCHIVE="$ROOT/dist/Colerm-$VERSION.zip"
-TOOLS="$ROOT/.build/artifacts/sparkle/Sparkle/bin"
 [[ -f "$ARCHIVE" ]] || { echo "Update archive not found: $ARCHIVE" >&2; exit 1; }
-[[ -x "$TOOLS/generate_appcast" ]] || { echo "Sparkle tools not found: $TOOLS" >&2; exit 1; }
+
+if [[ -z "$SPARKLE_TOOLS_DIR" ]]; then
+  SPARKLE_TOOL_CANDIDATES=(
+    "$ROOT/.build/release-universal/arm64/artifacts/sparkle/Sparkle/bin"
+    "$ROOT/.build/release-universal/x86_64/artifacts/sparkle/Sparkle/bin"
+    "$ROOT/.build/artifacts/sparkle/Sparkle/bin"
+  )
+  for candidate in "${SPARKLE_TOOL_CANDIDATES[@]}"; do
+    if [[ -x "$candidate/generate_appcast" ]]; then
+      SPARKLE_TOOLS_DIR="$candidate"
+      break
+    fi
+  done
+fi
+[[ -x "$SPARKLE_TOOLS_DIR/generate_appcast" ]] || {
+  echo "Sparkle generate_appcast tool not found. Set SPARKLE_TOOLS_DIR to its bin directory." >&2
+  exit 1
+}
 
 UPDATES_DIR="$(mktemp -d "${TMPDIR:-/tmp}/colerm-appcast.XXXXXX")"
 trap 'rm -rf "$UPDATES_DIR"' EXIT
@@ -46,7 +66,7 @@ curl -fsSL \
   "https://github.com/$REPOSITORY/releases/latest/download/appcast.xml" \
   -o "$UPDATES_DIR/appcast.xml" 2>/dev/null || true
 
-printf '%s' "$SPARKLE_ED_PRIVATE_KEY" | "$TOOLS/generate_appcast" \
+printf '%s' "$SPARKLE_ED_PRIVATE_KEY" | "$SPARKLE_TOOLS_DIR/generate_appcast" \
   --ed-key-file - \
   --download-url-prefix "https://github.com/$REPOSITORY/releases/download/$TAG/" \
   --maximum-deltas 0 \
