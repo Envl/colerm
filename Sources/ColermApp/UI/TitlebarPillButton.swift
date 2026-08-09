@@ -6,8 +6,8 @@ class TitlebarPillButton: NSButton {
     private var hoverTrackingArea: NSTrackingArea?
 
     var normalTintColor: NSColor { .secondaryLabelColor }
-    var normalBackgroundColor: NSColor { NSColor.labelColor.withAlphaComponent(0.08) }
-    var hoverBackgroundColor: NSColor { NSColor.labelColor.withAlphaComponent(0.16) }
+    var normalBackgroundColor: NSColor { .quaternaryLabelColor }
+    var hoverBackgroundColor: NSColor { .tertiaryLabelColor }
 
     override func updateTrackingAreas() {
         super.updateTrackingAreas()

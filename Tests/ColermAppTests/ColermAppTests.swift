@@ -237,6 +237,40 @@ final class ColermAppTests: XCTestCase {
         XCTAssertEqual(ColermTheme.ghosttyTheme, "light:Colerm Light,dark:Colerm Dark")
     }
 
+    @MainActor
+    func testPaletteTitlebarColorsAdaptToAppearance() throws {
+        func redComponent(of color: NSColor) -> CGFloat {
+            var red: CGFloat = 0
+            var green: CGFloat = 0
+            var blue: CGFloat = 0
+            var alpha: CGFloat = 0
+            color.getRed(&red, green: &green, blue: &blue, alpha: &alpha)
+            return red
+        }
+
+        let button = PaletteTitlebarButton(title: "Search", target: nil, action: nil)
+        let darkAppearance = try XCTUnwrap(NSAppearance(named: .darkAqua))
+        let lightAppearance = try XCTUnwrap(NSAppearance(named: .aqua))
+
+        let darkTint = ColermTheme.resolved(button.normalTintColor, for: darkAppearance)
+        let lightTint = ColermTheme.resolved(button.normalTintColor, for: lightAppearance)
+        let darkBackground = ColermTheme.resolved(
+            button.normalBackgroundColor,
+            for: darkAppearance
+        )
+        let lightBackground = ColermTheme.resolved(
+            button.normalBackgroundColor,
+            for: lightAppearance
+        )
+
+        XCTAssertGreaterThan(redComponent(of: darkTint), 0.9)
+        XCTAssertLessThan(redComponent(of: lightTint), 0.1)
+        XCTAssertGreaterThan(redComponent(of: darkBackground), 0.9)
+        XCTAssertLessThan(redComponent(of: lightBackground), 0.1)
+        XCTAssertGreaterThan(darkBackground.alphaComponent, 0)
+        XCTAssertLessThan(darkBackground.alphaComponent, 0.2)
+    }
+
     func testWorkspaceSessionOrderingUsesInsertionBoundaries() {
         let original = ["A", "B", "C", "D"]
 
