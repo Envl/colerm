@@ -52,15 +52,30 @@ private struct GitSummaryView: View {
                 .lineLimit(1)
 
             if git.changedFiles > 0 {
-                Label("\(git.changedFiles)", systemImage: "doc.text")
+                HStack(spacing: 2) {
+                    Image(systemName: "doc.text")
+                    Text("\(git.changedFiles)")
+                }
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel("\(git.changedFiles) changed files")
             }
             if git.insertions > 0 {
-                Label("\(git.insertions)", systemImage: "plus")
+                HStack(spacing: 2) {
+                    Image(systemName: "plus")
+                    Text("\(git.insertions)")
+                }
                     .foregroundStyle(.green)
+                    .accessibilityElement(children: .combine)
+                    .accessibilityLabel("\(git.insertions) insertions")
             }
             if git.deletions > 0 {
-                Label("\(git.deletions)", systemImage: "minus")
+                HStack(spacing: 2) {
+                    Image(systemName: "minus")
+                    Text("\(git.deletions)")
+                }
                     .foregroundStyle(.red)
+                    .accessibilityElement(children: .combine)
+                    .accessibilityLabel("\(git.deletions) deletions")
             }
         }
         .font(.system(size: 10, weight: .medium, design: .monospaced))
