@@ -69,13 +69,21 @@ final class ColermApplication: NSObject, NSApplicationDelegate {
             observer.onAvailabilityChanged = { [weak windowController] available in
                 windowController?.setUpdateAvailable(available)
             }
+            observer.onUpdateError = { [weak self] error in
+                DispatchQueue.main.async { [weak self] in
+                    self?.presentUpdateError(error) {
+                        installUpdate?()
+                    }
+                }
+            }
             updaterController = SPUStandardUpdaterController(
                 startingUpdater: true,
                 updaterDelegate: observer,
                 userDriverDelegate: nil
             )
             updateAvailabilityObserver = observer
-            installUpdate = { [weak updaterController] in
+            installUpdate = { [weak updaterController, weak observer] in
+                observer?.markUserInitiatedUpdateCheck()
                 updaterController?.checkForUpdates(nil)
             }
             updaterController?.updater.checkForUpdateInformation()
@@ -177,6 +185,51 @@ final class ColermApplication: NSObject, NSApplicationDelegate {
         item.target = router
         item.keyEquivalentModifierMask = [.command]
         return item
+    }
+
+    private func presentUpdateError(_ error: any Error, retry: @escaping () -> Void) {
+        let appPath = Bundle.main.bundleURL.standardizedFileURL.path
+        let installedInSystemApplications = appPath.hasPrefix("/Applications/")
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = "Colerm couldn’t finish the update"
+
+        if installedInSystemApplications {
+            alert.informativeText = "macOS may be blocking Colerm from replacing the copy in /Applications. Enable Colerm under Privacy & Security → App Management, then retry.\n\n\(error.localizedDescription)"
+            alert.addButton(withTitle: "Open App Management")
+            alert.addButton(withTitle: "Retry")
+            alert.addButton(withTitle: "Cancel")
+        } else {
+            alert.informativeText = error.localizedDescription
+            alert.addButton(withTitle: "Retry")
+            alert.addButton(withTitle: "Cancel")
+        }
+
+        NSApp.activate(ignoringOtherApps: true)
+        let response = alert.runModal()
+        if installedInSystemApplications {
+            switch response {
+            case .alertFirstButtonReturn:
+                openAppManagementSettings()
+            case .alertSecondButtonReturn:
+                retry()
+            default:
+                break
+            }
+        } else if response == .alertFirstButtonReturn {
+            retry()
+        }
+    }
+
+    private func openAppManagementSettings() {
+        let appManagementURL = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AppManagement")
+        let privacyURL = URL(string: "x-apple.systempreferences:com.apple.preference.security")
+        if let appManagementURL, NSWorkspace.shared.open(appManagementURL) {
+            return
+        }
+        if let privacyURL {
+            NSWorkspace.shared.open(privacyURL)
+        }
     }
 }
 
