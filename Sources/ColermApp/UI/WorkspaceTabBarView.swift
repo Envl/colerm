@@ -25,6 +25,8 @@ struct WorkspaceTabBarView: View {
                             isSelected: store.selectedSessionID == session.id,
                             onSelect: { store.select(session.id) },
                             onClose: { _ = store.closeColumn(session.id, confirm: false) },
+                            onNewTabLeft: { store.addColumn(toLeftOf: session.id) },
+                            onNewTabRight: { store.addColumn(toRightOf: session.id) },
                             onDragChanged: { updateDrag(session.id, value: $0) },
                             onDragEnded: { finishDrag(session.id) }
                         )
@@ -157,6 +159,8 @@ private struct WorkspaceTab: View {
     let isSelected: Bool
     let onSelect: () -> Void
     let onClose: () -> Void
+    let onNewTabLeft: () -> Void
+    let onNewTabRight: () -> Void
     let onDragChanged: (DragGesture.Value) -> Void
     let onDragEnded: () -> Void
 
@@ -227,6 +231,10 @@ private struct WorkspaceTab: View {
             }
         }
         .onHover { isHovered = $0 }
+        .contextMenu {
+            Button("New Tab to the Left", systemImage: "arrow.left.to.line", action: onNewTabLeft)
+            Button("New Tab to the Right", systemImage: "arrow.right.to.line", action: onNewTabRight)
+        }
         .accessibilityElement(children: .contain)
     }
 

@@ -118,7 +118,7 @@ final class WorkspaceViewController: NSViewController {
     }
 
     func closeSelectedColumn() {
-        _ = store.closeSelectedColumn()
+        _ = store.closeSelectedColumn(confirm: false)
         pagerController.synchronize()
     }
 

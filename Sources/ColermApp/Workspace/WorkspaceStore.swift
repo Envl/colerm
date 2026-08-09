@@ -78,10 +78,21 @@ final class WorkspaceStore: ObservableObject {
         addColumn(workingDirectory: selectedSession?.cwd ?? currentDirectoryURL)
     }
 
+    func addColumn(toLeftOf sessionID: TerminalSessionID) {
+        guard let index = sessions.firstIndex(where: { $0.id == sessionID }) else { return }
+        _ = addColumn(workingDirectory: sessions[index].cwd, insertionIndex: index)
+    }
+
+    func addColumn(toRightOf sessionID: TerminalSessionID) {
+        guard let index = sessions.firstIndex(where: { $0.id == sessionID }) else { return }
+        _ = addColumn(workingDirectory: sessions[index].cwd, insertionIndex: index + 1)
+    }
+
     @discardableResult
     func addColumn(
         workingDirectory: URL?,
         customTitle: String? = nil,
+        insertionIndex: Int? = nil,
         persist: Bool = true
     ) -> TerminalSession {
         let sessionID = UUID()
@@ -93,7 +104,15 @@ final class WorkspaceStore: ObservableObject {
             engine: engine,
             customTitle: customTitle
         )
-        sessions.append(session)
+        if let insertionIndex {
+            sessions = WorkspaceSessionOrdering.inserting(
+                session,
+                into: sessions,
+                at: insertionIndex
+            )
+        } else {
+            sessions.append(session)
+        }
         select(sessionID, persist: false)
         refreshMetadata(for: session)
         if persist { save() }
@@ -367,6 +386,16 @@ private var currentDirectoryURL: URL {
 }
 
 enum WorkspaceSessionOrdering {
+    static func inserting<Element>(
+        _ element: Element,
+        into elements: [Element],
+        at insertionIndex: Int
+    ) -> [Element] {
+        var result = elements
+        result.insert(element, at: min(max(insertionIndex, 0), result.count))
+        return result
+    }
+
     static func move<Element>(
         _ elements: [Element],
         from sourceIndex: Int,

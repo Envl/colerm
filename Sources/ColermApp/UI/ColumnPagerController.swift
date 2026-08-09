@@ -119,7 +119,7 @@ final class ColumnPagerController: NSViewController {
         for sessionID in staleColumnIDs {
             columnViews.removeValue(forKey: sessionID)?.removeFromSuperview()
         }
-        let validSplitterIDs = Set(store.sessions.dropLast().map(\.id))
+        let validSplitterIDs = Set(store.sessions.map(\.id))
         let staleSplitterIDs = splitterViews.keys.filter { !validSplitterIDs.contains($0) }
         for sessionID in staleSplitterIDs {
             splitterViews.removeValue(forKey: sessionID)?.removeFromSuperview()
@@ -127,7 +127,7 @@ final class ColumnPagerController: NSViewController {
     }
 
     private func buildMissingViews() {
-        for (index, session) in store.sessions.enumerated() {
+        for session in store.sessions {
             if columnViews[session.id] == nil {
                 let sessionID = session.id
                 let column = TerminalColumnView(
@@ -137,6 +137,11 @@ final class ColumnPagerController: NSViewController {
                     },
                     onNewTerminal: { [weak self] in
                         self?.store.addColumn()
+                    },
+                    onCloseTerminal: { [weak self] in
+                        guard let self else { return }
+                        _ = store.closeColumn(sessionID, confirm: false)
+                        synchronize()
                     },
                     onOpenSettings: onOpenSettings,
                     onCycleTerminal: { [weak self] offset in
@@ -148,7 +153,7 @@ final class ColumnPagerController: NSViewController {
                 documentView.addSubview(column)
             }
 
-            if index < store.sessions.count - 1, splitterViews[session.id] == nil {
+            if splitterViews[session.id] == nil {
                 let splitter = TerminalSplitterView(frame: .zero)
                 splitter.onResize = { [weak self, weak session] delta in
                     guard let self, let session else { return }
@@ -168,7 +173,7 @@ final class ColumnPagerController: NSViewController {
         let height = max(scrollView.contentView.bounds.height, 1)
         var x: CGFloat = 0
 
-        for (index, session) in store.sessions.enumerated() {
+        for session in store.sessions {
             columnViews[session.id]?.frame = NSRect(
                 x: x,
                 y: 0,
@@ -177,15 +182,13 @@ final class ColumnPagerController: NSViewController {
             )
             x += session.columnWidth
 
-            if index < store.sessions.count - 1 {
-                splitterViews[session.id]?.frame = NSRect(
-                    x: x - (Self.splitterHitWidth - Self.splitterLayoutWidth) / 2,
-                    y: 0,
-                    width: Self.splitterHitWidth,
-                    height: height
-                )
-                x += Self.splitterLayoutWidth
-            }
+            splitterViews[session.id]?.frame = NSRect(
+                x: x - (Self.splitterHitWidth - Self.splitterLayoutWidth) / 2,
+                y: 0,
+                width: Self.splitterHitWidth,
+                height: height
+            )
+            x += Self.splitterLayoutWidth
         }
 
         let addTerminalWidth = max(
@@ -261,8 +264,10 @@ final class ColumnPagerController: NSViewController {
         guard index >= 0, index < store.sessions.count else { return }
         let sessionID = store.sessions[index].id
         guard let frame = columnViews[sessionID]?.frame else { return }
-        let maximumX = max(documentView.bounds.width - scrollView.contentView.bounds.width, 0)
-        let destination = NSPoint(x: min(frame.minX, maximumX), y: 0)
+        let viewportWidth = scrollView.contentView.bounds.width
+        let maximumX = max(documentView.bounds.width - viewportWidth, 0)
+        let centeredX = frame.midX - viewportWidth / 2
+        let destination = NSPoint(x: min(max(centeredX, 0), maximumX), y: 0)
         guard destination != scrollView.contentView.bounds.origin else {
             updateSurfaceVisibility()
             return
@@ -333,6 +338,7 @@ private final class TerminalColumnView: NSView {
         session: TerminalSession,
         onSelect: @escaping () -> Void,
         onNewTerminal: @escaping () -> Void,
+        onCloseTerminal: @escaping () -> Void,
         onOpenSettings: @escaping () -> Void,
         onCycleTerminal: @escaping (Int) -> Void,
         shortcutSettings: KeyboardShortcutSettings
@@ -351,6 +357,7 @@ private final class TerminalColumnView: NSView {
         if let terminalView = session.view as? TerminalSurfaceView {
             terminalView.onSelect = onSelect
             terminalView.onNewTerminal = onNewTerminal
+            terminalView.onCloseTerminal = onCloseTerminal
             terminalView.onOpenSettings = onOpenSettings
             terminalView.onCycleTerminal = onCycleTerminal
             terminalView.shortcutSettings = shortcutSettings

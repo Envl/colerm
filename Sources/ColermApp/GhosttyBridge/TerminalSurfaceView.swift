@@ -5,6 +5,7 @@ import GhosttyTerminal
 final class TerminalSurfaceView: TerminalView {
     var onSelect: (() -> Void)?
     var onNewTerminal: (() -> Void)?
+    var onCloseTerminal: (() -> Void)?
     var onOpenSettings: (() -> Void)?
     var onCycleTerminal: ((Int) -> Void)?
     weak var shortcutSettings: KeyboardShortcutSettings?
@@ -42,6 +43,20 @@ final class TerminalSurfaceView: TerminalView {
            event.charactersIgnoringModifiers?.lowercased() == "t"
         {
             onNewTerminal?()
+            return true
+        }
+
+        if modifiers == [.command],
+           event.charactersIgnoringModifiers?.lowercased() == "w"
+        {
+            onCloseTerminal?()
+            return true
+        }
+
+        if modifiers == [.command],
+           event.charactersIgnoringModifiers?.lowercased() == "q"
+        {
+            NSApp.terminate(nil)
             return true
         }
 

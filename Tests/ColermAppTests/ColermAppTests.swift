@@ -4,6 +4,21 @@ import Carbon
 @testable import ColermApp
 
 final class ColermAppTests: XCTestCase {
+    func testWorkspaceSessionOrderingInsertsAtBoundedPosition() {
+        XCTAssertEqual(
+            WorkspaceSessionOrdering.inserting("new", into: ["a", "b"], at: 1),
+            ["a", "new", "b"]
+        )
+        XCTAssertEqual(
+            WorkspaceSessionOrdering.inserting("new", into: ["a", "b"], at: -1),
+            ["new", "a", "b"]
+        )
+        XCTAssertEqual(
+            WorkspaceSessionOrdering.inserting("new", into: ["a", "b"], at: 99),
+            ["a", "b", "new"]
+        )
+    }
+
     func testTerminalPaletteSearchMatchesTitlePathAndAllTerms() {
         let buildID = UUID()
         let serverID = UUID()
