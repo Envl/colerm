@@ -52,6 +52,65 @@ final class ColermAppTests: XCTestCase {
         XCTAssertEqual(TerminalPaletteSearch.filter(items, query: "   "), items)
     }
 
+    func testTerminalPaletteSearchMatchesSeparatorsAndFuzzySubsequences() {
+        let livePhoto = TerminalPaletteItem(
+            id: TerminalSessionID(),
+            index: 1,
+            title: "live-photo",
+            path: "~/Code/live-photo"
+        )
+        let shellClick = TerminalPaletteItem(
+            id: TerminalSessionID(),
+            index: 2,
+            title: "Shell Click",
+            path: "~/Code/shell-click"
+        )
+        let items = [livePhoto, shellClick]
+
+        XCTAssertEqual(
+            TerminalPaletteSearch.filter(items, query: "livepho").map(\.id),
+            [livePhoto.id]
+        )
+        XCTAssertEqual(
+            TerminalPaletteSearch.filter(items, query: "sclk").map(\.id),
+            [shellClick.id]
+        )
+        XCTAssertEqual(
+            TerminalPaletteSearch.filter(items, query: "lvpto").map(\.id),
+            [livePhoto.id]
+        )
+        XCTAssertTrue(TerminalPaletteSearch.filter(items, query: "clx").isEmpty)
+    }
+
+    func testTerminalPaletteSearchPromotesTitleMatchesAndKeepsTiesStable() {
+        let pathOnly = TerminalPaletteItem(
+            id: TerminalSessionID(),
+            index: 1,
+            title: "backend",
+            path: "~/Code/live-photo"
+        )
+        let titleMatch = TerminalPaletteItem(
+            id: TerminalSessionID(),
+            index: 2,
+            title: "live-photo",
+            path: "~/Code/other"
+        )
+        let secondTitleMatch = TerminalPaletteItem(
+            id: TerminalSessionID(),
+            index: 3,
+            title: "live-photo-tests",
+            path: "~/Code/tests"
+        )
+
+        XCTAssertEqual(
+            TerminalPaletteSearch.filter(
+                [pathOnly, titleMatch, secondTitleMatch],
+                query: "livepho"
+            ).map(\.id),
+            [titleMatch.id, secondTitleMatch.id, pathOnly.id]
+        )
+    }
+
     @MainActor
     func testKeyboardShortcutsPersistAndRejectConflicts() {
         let suiteName = "ColermAppTests.shortcuts.\(UUID().uuidString)"
