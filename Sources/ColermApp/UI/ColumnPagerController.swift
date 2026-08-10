@@ -295,7 +295,8 @@ final class ColumnPagerController: NSViewController {
         let visibleRect = scrollView.documentVisibleRect
         for session in store.sessions {
             let frame = columnViews[session.id]?.frame ?? .zero
-            session.setOccluded(!frame.intersects(visibleRect))
+            let isSelected = session.id == store.selectedSessionID
+            session.setOccluded(!isSelected && !frame.intersects(visibleRect))
         }
         splitterViews.values.forEach { $0.refreshHoverState() }
     }

@@ -4,11 +4,17 @@ import GhosttyTerminal
 @MainActor
 final class TerminalSurfaceView: TerminalView {
     var onSelect: (() -> Void)?
+    var onLayout: (() -> Void)?
     var onNewTerminal: (() -> Void)?
     var onCloseTerminal: (() -> Void)?
     var onOpenSettings: (() -> Void)?
     var onCycleTerminal: ((Int) -> Void)?
     weak var shortcutSettings: KeyboardShortcutSettings?
+
+    override func layout() {
+        super.layout()
+        onLayout?()
+    }
 
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
         if handleWorkspaceShortcut(event) { return true }

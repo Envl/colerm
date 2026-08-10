@@ -116,7 +116,7 @@ final class TerminalSession: ObservableObject, Identifiable {
         self.customTitle = customTitle
         self.columnWidth = columnWidth
         self.metadata = SessionMetadata(cwd: launchOptions.workingDirectory, title: nil, runtime: nil, git: nil, lastExitCode: nil, isAtPrompt: false)
-        self.processState = engine.isRunning ? .running : .closed
+        self.processState = engine.isRunning ? .running : .launching
     }
 
     func setActive(_ active: Bool) {
@@ -205,6 +205,11 @@ final class TerminalSession: ObservableObject, Identifiable {
     @discardableResult
     func refreshForegroundActivity() -> Bool {
         let wasRunning = isForegroundCommandRunning
+
+        if processState == .launching, engine.isRunning {
+            processState = .running
+            objectWillChange.send()
+        }
 
         guard processState.isRunning,
               engine.isRunning,

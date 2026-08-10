@@ -349,6 +349,38 @@ final class ColermAppTests: XCTestCase {
         XCTAssertEqual(persistence.load(), document)
     }
 
+    @MainActor
+    func testWorkspaceLaunchSelectsFirstPersistedSession() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ColumnTests-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let first = UUID()
+        let second = UUID()
+        let persistence = WorkspacePersistence(
+            fileURL: directory.appendingPathComponent("workspace.json")
+        )
+        try persistence.save(
+            PersistedWorkspace(
+                selectedSessionID: second,
+                sessions: [
+                    PersistedSession(id: first, cwd: URL(fileURLWithPath: "/tmp/first"), columnWidth: 600),
+                    PersistedSession(id: second, cwd: URL(fileURLWithPath: "/tmp/second"), columnWidth: 600)
+                ]
+            )
+        )
+
+        let store = WorkspaceStore(
+            persistence: persistence,
+            runtime: GhosttyRuntime(),
+            gitInspector: GitInspector()
+        )
+
+        XCTAssertEqual(store.selectedSessionID, first)
+        XCTAssertTrue(store.sessions[0].isActive)
+        XCTAssertFalse(store.sessions[1].isActive)
+    }
+
     func testDebugWorkspacePersistenceIsIsolatedFromRelease() {
         XCTAssertEqual(
             WorkspacePersistence.supportDirectoryName(bundleIdentifier: "com.colerm.app"),
@@ -380,6 +412,23 @@ final class ColermAppTests: XCTestCase {
         session.commandFinished(exitCode: 0)
         XCTAssertFalse(session.refreshForegroundActivity())
         XCTAssertFalse(session.isForegroundCommandRunning)
+    }
+
+    @MainActor
+    func testTerminalSessionWaitsForEngineReadiness() {
+        let engine = ActivityTestEngine()
+        engine.isRunning = false
+        let session = TerminalSession(
+            launchOptions: SessionLaunchOptions(),
+            engine: engine
+        )
+
+        XCTAssertEqual(session.processState, .launching)
+
+        engine.reportedForegroundPID = 100
+        engine.isRunning = true
+        XCTAssertFalse(session.refreshForegroundActivity())
+        XCTAssertEqual(session.processState, .running)
     }
 }
 

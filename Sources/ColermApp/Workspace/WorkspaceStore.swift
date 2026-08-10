@@ -324,10 +324,7 @@ final class WorkspaceStore: ObservableObject {
             )
         }
 
-        if let selected = persisted.selectedSessionID,
-           sessions.contains(where: { $0.id == selected }) {
-            select(selected, persist: false)
-        } else if let first = sessions.first {
+        if let first = sessions.first {
             select(first.id, persist: false)
         }
         sessions.forEach(refreshMetadata)

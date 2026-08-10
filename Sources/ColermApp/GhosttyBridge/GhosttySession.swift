@@ -8,10 +8,14 @@ final class GhosttySession: TerminalEngineSession {
 
     private let controller: TerminalController
     private let actionHandler: (GhosttyAction) -> Void
-    private(set) var isRunning = true
+    private var isClosed = false
+    private var hasSurface = false
 
     var view: NSView { terminalView }
     var foregroundPID: pid_t? { terminalView.foregroundPid }
+    var isRunning: Bool {
+        !isClosed && hasSurface && foregroundPID != nil
+    }
 
     init(
         id: UUID,
@@ -43,6 +47,9 @@ final class GhosttySession: TerminalEngineSession {
         )
         terminalView.delegate = self
         terminalView.controller = controller
+        terminalView.onLayout = { [weak self] in
+            self?.ensureSurface()
+        }
     }
 
     func focus() {
@@ -60,10 +67,11 @@ final class GhosttySession: TerminalEngineSession {
     }
 
     func close() {
-        guard isRunning else { return }
-        isRunning = false
+        guard !isClosed else { return }
+        isClosed = true
         terminalView.controller = nil
         terminalView.delegate = nil
+        terminalView.onLayout = nil
     }
 }
 
@@ -74,8 +82,17 @@ extension GhosttySession:
     TerminalSurfaceDesktopNotificationDelegate,
     TerminalSurfaceBellDelegate,
     TerminalSurfaceCloseDelegate,
+    TerminalSurfaceLifecycleDelegate,
     TerminalSurfaceOpenURLDelegate
 {
+    func terminalDidAttachSurface(_: TerminalSurface) {
+        hasSurface = true
+    }
+
+    func terminalDidDetachSurface() {
+        hasSurface = false
+    }
+
     func terminalDidChangeTitle(_ title: String) {
         actionHandler(.title(id, title))
     }
@@ -108,5 +125,19 @@ extension GhosttySession:
     func terminalDidRequestOpenURL(_ url: String, kind _: TerminalOpenURLKind) {
         guard let url = URL(string: url) else { return }
         actionHandler(.openURL(url))
+    }
+
+    private func ensureSurface() {
+        guard !isClosed,
+              !hasSurface,
+              terminalView.window != nil,
+              terminalView.bounds.width > 0,
+              terminalView.bounds.height > 0
+        else { return }
+
+        // Ghostty can attach the view before AppKit has assigned its final frame.
+        // Retry the normal controller lifecycle once layout provides a usable size.
+        terminalView.controller = nil
+        terminalView.controller = controller
     }
 }
