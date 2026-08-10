@@ -2,6 +2,7 @@ import SwiftUI
 
 struct WorkspaceTabBarView: View {
     @ObservedObject var store: WorkspaceStore
+    let onSelectSession: (TerminalSessionID) -> Void
 
     @State private var draggedSessionID: TerminalSessionID?
     @State private var previewOrder: [TerminalSessionID] = []
@@ -23,7 +24,7 @@ struct WorkspaceTabBarView: View {
                         WorkspaceTab(
                             session: session,
                             isSelected: store.selectedSessionID == session.id,
-                            onSelect: { store.select(session.id) },
+                            onSelect: { onSelectSession(session.id) },
                             onClose: { _ = store.closeColumn(session.id, confirm: false) },
                             onNewTabLeft: { store.addColumn(toLeftOf: session.id) },
                             onNewTabRight: { store.addColumn(toRightOf: session.id) },

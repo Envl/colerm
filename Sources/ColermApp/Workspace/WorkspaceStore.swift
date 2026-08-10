@@ -114,7 +114,6 @@ final class WorkspaceStore: ObservableObject {
             sessions.append(session)
         }
         select(sessionID, persist: false)
-        refreshMetadata(for: session)
         if persist { save() }
         return session
     }
@@ -156,6 +155,9 @@ final class WorkspaceStore: ObservableObject {
         guard sessions.contains(where: { $0.id == sessionID }) else { return }
         if selectedSessionID == sessionID {
             selectedSession?.setActive(true)
+            if let selectedSession {
+                refreshMetadata(for: selectedSession, force: true)
+            }
             return
         }
 
@@ -163,7 +165,7 @@ final class WorkspaceStore: ObservableObject {
         selectedSessionID = sessionID
         selectedSession?.setActive(true)
         if let selectedSession {
-            refreshMetadata(for: selectedSession)
+            refreshMetadata(for: selectedSession, force: true)
         }
         if persist { save() }
     }
@@ -210,7 +212,7 @@ final class WorkspaceStore: ObservableObject {
         save()
     }
 
-    func refreshMetadata(for session: TerminalSession) {
+    func refreshMetadata(for session: TerminalSession, force: Bool = false) {
         gitInspectionTasks[session.id]?.cancel()
         guard let directory = session.cwd else {
             session.updateGit(nil)
@@ -219,6 +221,9 @@ final class WorkspaceStore: ObservableObject {
 
         let inspector = gitInspector
         gitInspectionTasks[session.id] = Task { [weak self, weak session] in
+            if force {
+                await inspector.invalidate(directory: directory)
+            }
             let result = await inspector.inspect(directory: directory)
             guard !Task.isCancelled else { return }
             guard let self, let session, session.cwd == directory else { return }
@@ -327,7 +332,7 @@ final class WorkspaceStore: ObservableObject {
         if let first = sessions.first {
             select(first.id, persist: false)
         }
-        sessions.forEach(refreshMetadata)
+        sessions.dropFirst().forEach { refreshMetadata(for: $0) }
     }
 
     private func startActivityMonitoring() {

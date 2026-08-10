@@ -7,7 +7,16 @@ final class WorkspaceViewController: NSViewController {
     let store: WorkspaceStore
 
     private let pagerController: ColumnPagerController
-    private let tabBarView: NSHostingView<WorkspaceTabBarView>
+    private lazy var tabBarView: NSHostingView<WorkspaceTabBarView> = {
+        NSHostingView(
+            rootView: WorkspaceTabBarView(
+                store: store,
+                onSelectSession: { [weak self] sessionID in
+                    self?.selectColumn(sessionID)
+                }
+            )
+        )
+    }()
     private let footerView: NSHostingView<WorkspaceFooterView>
     private var storeCancellable: AnyCancellable?
 
@@ -32,9 +41,6 @@ final class WorkspaceViewController: NSViewController {
             store: store,
             shortcutSettings: shortcutSettings,
             onOpenSettings: onOpenSettings
-        )
-        self.tabBarView = NSHostingView(
-            rootView: WorkspaceTabBarView(store: store)
         )
         self.footerView = NSHostingView(
             rootView: WorkspaceFooterView(

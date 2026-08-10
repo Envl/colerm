@@ -140,7 +140,7 @@ final class ColumnPagerController: NSViewController {
                     },
                     onCloseTerminal: { [weak self] in
                         guard let self else { return }
-                        _ = store.closeColumn(sessionID, confirm: false)
+                        _ = store.closeSelectedColumn(confirm: false)
                         synchronize()
                     },
                     onOpenSettings: onOpenSettings,

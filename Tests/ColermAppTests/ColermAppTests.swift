@@ -379,6 +379,56 @@ final class ColermAppTests: XCTestCase {
         XCTAssertEqual(store.selectedSessionID, first)
         XCTAssertTrue(store.sessions[0].isActive)
         XCTAssertFalse(store.sessions[1].isActive)
+
+        store.select(second)
+        XCTAssertTrue(store.closeSelectedColumn(confirm: false))
+        XCTAssertEqual(store.sessions.map(\.id), [first])
+        XCTAssertEqual(store.selectedSessionID, first)
+    }
+
+    @MainActor
+    func testTabActivationForcesGitStatusRefresh() async throws {
+        let fixtureName = "ColumnGitRefresh-\(UUID().uuidString)"
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(fixtureName, isDirectory: true)
+        let persistenceURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("\(fixtureName).json")
+        defer {
+            try? FileManager.default.removeItem(at: directory)
+            try? FileManager.default.removeItem(at: persistenceURL)
+        }
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try runGit(arguments: ["-C", directory.path, "init", "-q"])
+        FileManager.default.createFile(
+            atPath: directory.appendingPathComponent("first.txt").path,
+            contents: Data()
+        )
+
+        let sessionID = UUID()
+        let persistence = WorkspacePersistence(fileURL: persistenceURL)
+        try persistence.save(
+            PersistedWorkspace(
+                selectedSessionID: sessionID,
+                sessions: [
+                    PersistedSession(id: sessionID, cwd: directory, columnWidth: 600)
+                ]
+            )
+        )
+
+        let store = WorkspaceStore(
+            persistence: persistence,
+            runtime: GhosttyRuntime(),
+            gitInspector: GitInspector(cacheLifetime: 60, debounceMilliseconds: 0)
+        )
+        try await waitForGitStatus(on: store.sessions[0], changedFiles: 1)
+
+        FileManager.default.createFile(
+            atPath: directory.appendingPathComponent("second.txt").path,
+            contents: Data()
+        )
+        store.select(sessionID)
+
+        try await waitForGitStatus(on: store.sessions[0], changedFiles: 2)
     }
 
     func testDebugWorkspacePersistenceIsIsolatedFromRelease() {
@@ -430,6 +480,29 @@ final class ColermAppTests: XCTestCase {
         XCTAssertFalse(session.refreshForegroundActivity())
         XCTAssertEqual(session.processState, .running)
     }
+}
+
+private func runGit(arguments: [String]) throws {
+    let process = Process()
+    process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+    process.arguments = ["git"] + arguments
+    try process.run()
+    process.waitUntilExit()
+    XCTAssertEqual(process.terminationStatus, 0)
+}
+
+@MainActor
+private func waitForGitStatus(
+    on session: TerminalSession,
+    changedFiles: Int
+) async throws {
+    for _ in 0..<20 {
+        if session.metadata.git?.changedFiles == changedFiles {
+            return
+        }
+        try await Task.sleep(nanoseconds: 50_000_000)
+    }
+    XCTFail("Timed out waiting for Git status with \(changedFiles) changed files")
 }
 
 @MainActor
