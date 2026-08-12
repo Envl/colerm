@@ -16,10 +16,11 @@ final class ColumnPagerController: NSViewController {
     private var columnViews: [TerminalSessionID: TerminalColumnView] = [:]
     private var splitterViews: [TerminalSessionID: TerminalSplitterView] = [:]
     private var selectionUpdate: DispatchWorkItem?
-    private var lastSelectedSessionID: TerminalSessionID?
+    private var lastSynchronizedSessionID: TerminalSessionID?
     private var lastSessionOrder: [TerminalSessionID] = []
     private var scrollAnimationGeneration = 0
     private var isProgrammaticScroll = false
+    private var suppressSelectionScroll = false
 
     init(
         store: WorkspaceStore,
@@ -85,16 +86,17 @@ final class ColumnPagerController: NSViewController {
         buildMissingViews()
         layoutDocument()
 
-        let selectionChanged = lastSelectedSessionID != store.selectedSessionID
+        let selectionChanged = lastSynchronizedSessionID != store.selectedSessionID
         if selectionChanged {
-            lastSelectedSessionID = store.selectedSessionID
+            lastSynchronizedSessionID = store.selectedSessionID
         }
-        if selectionChanged || orderChanged {
+        if (selectionChanged && !suppressSelectionScroll) || orderChanged {
             scrollToSelectedColumn()
         }
         if selectionChanged {
             focusSelectedSurface()
         }
+        suppressSelectionScroll = false
         updateSurfaceVisibility()
     }
 
@@ -219,22 +221,16 @@ final class ColumnPagerController: NSViewController {
         guard !store.sessions.isEmpty else { return }
         let wrappedIndex = (index % store.sessions.count + store.sessions.count) % store.sessions.count
         let sessionID = store.sessions[wrappedIndex].id
-        lastSelectedSessionID = sessionID
         store.select(sessionID)
-        scrollToColumn(at: wrappedIndex)
+        synchronize()
     }
 
     private func selectColumnFromPointer(_ sessionID: TerminalSessionID) {
-        // Pointer selection happens inside the current viewport. Mark it handled
-        // before publishing selection so synchronize() does not recenter it.
-        lastSelectedSessionID = sessionID
+        // Pointer selection already happens inside the current viewport. Keep it
+        // visible while still synchronizing the selected surface and focus.
+        suppressSelectionScroll = true
         store.select(sessionID)
-        if let terminalView = columnViews[sessionID]?.terminalSurface,
-           let window = view.window,
-           window.isKeyWindow {
-            window.makeFirstResponder(terminalView)
-        }
-        updateSurfaceVisibility()
+        synchronize()
     }
 
     private func scrollToSelectedColumn() {
@@ -321,8 +317,9 @@ final class ColumnPagerController: NSViewController {
             return abs(lhsCenter - centerX) < abs(rhsCenter - centerX)
         }
         guard let session = nearest?.element, session.id != store.selectedSessionID else { return }
-        lastSelectedSessionID = session.id
+        suppressSelectionScroll = true
         store.select(session.id)
+        synchronize()
     }
 }
 
