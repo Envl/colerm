@@ -387,6 +387,39 @@ final class ColermAppTests: XCTestCase {
     }
 
     @MainActor
+    func testWorkspaceAddColumnInsertsAfterSelectedSession() throws {
+        let fixtureName = "ColumnAddTests-\(UUID().uuidString)"
+        let persistenceURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("\(fixtureName).json")
+        defer { try? FileManager.default.removeItem(at: persistenceURL) }
+
+        let first = UUID()
+        let second = UUID()
+        let persistence = WorkspacePersistence(fileURL: persistenceURL)
+        try persistence.save(
+            PersistedWorkspace(
+                selectedSessionID: first,
+                sessions: [
+                    PersistedSession(id: first, cwd: URL(fileURLWithPath: "/tmp/first"), columnWidth: 600),
+                    PersistedSession(id: second, cwd: URL(fileURLWithPath: "/tmp/second"), columnWidth: 600)
+                ]
+            )
+        )
+
+        let store = WorkspaceStore(
+            persistence: persistence,
+            runtime: GhosttyRuntime(),
+            gitInspector: GitInspector()
+        )
+
+        store.addColumn()
+
+        let newSessionID = try XCTUnwrap(store.selectedSessionID)
+        XCTAssertEqual(store.sessions.map(\.id), [first, newSessionID, second])
+        XCTAssertEqual(store.selectedSession?.cwd, URL(fileURLWithPath: "/tmp/first"))
+    }
+
+    @MainActor
     func testTabActivationForcesGitStatusRefresh() async throws {
         let fixtureName = "ColumnGitRefresh-\(UUID().uuidString)"
         let directory = FileManager.default.temporaryDirectory

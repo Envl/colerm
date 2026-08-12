@@ -95,7 +95,6 @@ final class ColermApplication: NSObject, NSApplicationDelegate {
 
         NSApp.mainMenu = makeMainMenu(router: commandRouter)
         windowController.showWindow(nil)
-        windowController.window?.center()
         windowController.window?.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
     }

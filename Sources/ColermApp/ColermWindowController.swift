@@ -2,6 +2,10 @@ import AppKit
 
 @MainActor
 final class ColermWindowController: NSWindowController, NSWindowDelegate {
+    private static let frameAutosaveName = NSWindow.FrameAutosaveName(
+        "ColermMainWindow.\(Bundle.main.bundleIdentifier ?? "com.colerm.app")"
+    )
+
     let workspaceController: WorkspaceViewController
     private let onOpenCommandPalette: () -> Void
     private let onInstallUpdate: () -> Void
@@ -33,6 +37,10 @@ final class ColermWindowController: NSWindowController, NSWindowDelegate {
         window.contentViewController = workspaceController
         super.init(window: window)
         window.delegate = self
+        window.setFrameAutosaveName(Self.frameAutosaveName)
+        if !window.setFrameUsingName(Self.frameAutosaveName) {
+            window.center()
+        }
         installPaletteTitlebarAccessory(in: window)
     }
 
@@ -42,6 +50,10 @@ final class ColermWindowController: NSWindowController, NSWindowDelegate {
 
     func windowShouldClose(_: NSWindow) -> Bool {
         workspaceController.closeWindowIfAllowed()
+    }
+
+    func windowWillClose(_: Notification) {
+        window?.saveFrame(usingName: Self.frameAutosaveName)
     }
 
     func setUpdateAvailable(_ available: Bool) {

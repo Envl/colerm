@@ -75,7 +75,15 @@ final class WorkspaceStore: ObservableObject {
     }
 
     func addColumn() {
-        addColumn(workingDirectory: selectedSession?.cwd ?? currentDirectoryURL)
+        let insertionIndex = selectedSessionID
+            .flatMap { sessionID in
+                sessions.firstIndex { $0.id == sessionID }
+            }
+            .map { $0 + 1 }
+        addColumn(
+            workingDirectory: selectedSession?.cwd ?? currentDirectoryURL,
+            insertionIndex: insertionIndex
+        )
     }
 
     func addColumn(toLeftOf sessionID: TerminalSessionID) {
