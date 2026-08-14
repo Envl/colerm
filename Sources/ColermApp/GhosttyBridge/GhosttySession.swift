@@ -26,7 +26,7 @@ final class GhosttySession: TerminalEngineSession {
         self.actionHandler = actionHandler
 
         var configuration = TerminalConfiguration.default
-            .custom("confirm-close-surface", "false")
+            .custom("confirm-close-surface", "true")
             .custom("shell-integration", "detect")
             .custom("term", "xterm-256color")
             .custom("theme", ColermTheme.ghosttyTheme)
