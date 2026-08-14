@@ -191,6 +191,33 @@ final class ColermAppTests: XCTestCase {
         )
     }
 
+    @MainActor
+    func testPaletteConsumesUnhandledModifierKeyEquivalents() throws {
+        let panel = TerminalCommandPalettePanel(
+            contentRect: .zero,
+            styleMask: TerminalCommandPalettePanel.paletteStyleMask,
+            backing: .buffered,
+            defer: false
+        )
+        let commandEvent = try XCTUnwrap(NSEvent.keyEvent(
+            with: .keyDown,
+            location: .zero,
+            modifierFlags: .command,
+            timestamp: 0,
+            windowNumber: 0,
+            context: nil,
+            characters: "n",
+            charactersIgnoringModifiers: "n",
+            isARepeat: false,
+            keyCode: UInt16(kVK_ANSI_N)
+        ))
+
+        XCTAssertTrue(panel.canBecomeKey)
+        XCTAssertTrue(panel.styleMask.contains(.nonactivatingPanel))
+        XCTAssertTrue(panel.ownsKeyEquivalent(commandEvent))
+        XCTAssertTrue(panel.performKeyEquivalent(with: commandEvent))
+    }
+
     func testRuntimeMetadataRejectsOversizedAndRemotePayloads() {
         let valid = Data(#"{"runtime":{"name":"Node","path":"/tmp/colerm-test/.local/bin/node","version":"v24.15.0"}}"#.utf8)
         let metadata = RuntimeMetadataParser.decode(valid)

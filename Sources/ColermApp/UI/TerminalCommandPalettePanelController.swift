@@ -24,7 +24,7 @@ final class TerminalCommandPalettePanelController: NSObject, NSWindowDelegate {
         self.restoreTerminalFocus = restoreTerminalFocus
         panel = TerminalCommandPalettePanel(
             contentRect: NSRect(origin: .zero, size: TerminalCommandPaletteLayout.panelSize),
-            styleMask: [.borderless],
+            styleMask: TerminalCommandPalettePanel.paletteStyleMask,
             backing: .buffered,
             defer: false
         )
@@ -207,14 +207,17 @@ private extension NSView {
 }
 
 @MainActor
-private final class TerminalCommandPalettePanel: NSPanel {
+final class TerminalCommandPalettePanel: NSPanel {
+    static let paletteStyleMask: NSWindow.StyleMask = [
+        .borderless,
+        .nonactivatingPanel,
+    ]
+
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { false }
 
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
-        let modifiers = event.modifierFlags.intersection([
-            .shift, .control, .option, .command
-        ])
+        let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
         if modifiers == [.command],
            event.keyCode == UInt16(kVK_Delete),
            let editor = searchFieldEditor ?? activateSearchFieldEditor() {
@@ -222,7 +225,28 @@ private final class TerminalCommandPalettePanel: NSPanel {
             return true
         }
 
-        return super.performKeyEquivalent(with: event)
+        if super.performKeyEquivalent(with: event) {
+            return true
+        }
+
+        // Keep unresolved shortcuts inside the palette instead of allowing
+        // NSApplication to route them through the main menu or the owner window.
+        // AppKit beeps when a key equivalent reaches a responder that cannot
+        // handle it; consuming it here keeps the palette quiet.
+        guard ownsKeyEquivalent(event) else {
+            return false
+        }
+        searchFieldEditor?.keyDown(with: event)
+        return true
+    }
+
+    func ownsKeyEquivalent(_ event: NSEvent) -> Bool {
+        let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        return !modifiers.intersection([.command, .control, .option]).isEmpty
+    }
+
+    override func flagsChanged(with _: NSEvent) {
+        // Modifier-only changes stop at the palette's responder chain.
     }
 
     fileprivate var searchFieldEditor: NSTextView? {
