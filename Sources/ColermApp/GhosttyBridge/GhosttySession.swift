@@ -30,7 +30,7 @@ final class GhosttySession: TerminalEngineSession {
             .custom("shell-integration", "detect")
             .custom("term", "xterm-256color")
             .custom("theme", ColermTheme.ghosttyTheme)
-            .custom("window-padding-x", "6")
+            .custom("window-padding-x", "10")
         if let command = options.command, !command.isEmpty {
             configuration = configuration.custom("command", "shell:\(command)")
         }

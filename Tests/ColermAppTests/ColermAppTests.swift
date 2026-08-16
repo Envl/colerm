@@ -262,6 +262,8 @@ final class ColermAppTests: XCTestCase {
         let lightAppearance = try XCTUnwrap(NSAppearance(named: .aqua))
         let dark = ColermTheme.resolved(ColermTheme.terminalTitleNS, for: darkAppearance)
         let light = ColermTheme.resolved(ColermTheme.terminalTitleNS, for: lightAppearance)
+        let darkSplitter = ColermTheme.resolved(ColermTheme.terminalSplitterNS, for: darkAppearance)
+        let lightSplitter = ColermTheme.resolved(ColermTheme.terminalSplitterNS, for: lightAppearance)
 
         var darkRed: CGFloat = 0
         var darkGreen: CGFloat = 0
@@ -280,6 +282,13 @@ final class ColermAppTests: XCTestCase {
         XCTAssertGreaterThan(lightRed, 0.9)
         XCTAssertGreaterThan(lightGreen, 0.9)
         XCTAssertGreaterThan(lightBlue, 0.9)
+
+        var darkSplitterRed: CGFloat = 0
+        var lightSplitterRed: CGFloat = 0
+        darkSplitter.getRed(&darkSplitterRed, green: nil, blue: nil, alpha: nil)
+        lightSplitter.getRed(&lightSplitterRed, green: nil, blue: nil, alpha: nil)
+        XCTAssertEqual(darkSplitterRed, 0.30, accuracy: 0.001)
+        XCTAssertEqual(lightSplitterRed, 0.76, accuracy: 0.001)
         XCTAssertEqual(ColermTheme.ghosttyTheme, "light:Colerm Light,dark:Colerm Dark")
     }
 

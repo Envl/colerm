@@ -469,7 +469,7 @@ private final class TerminalSplitterView: NSView {
         lineLayer.backgroundColor = ColermTheme.resolved(
             hovered
                 ? NSColor.labelColor.withAlphaComponent(0.72)
-                : NSColor.separatorColor,
+                : ColermTheme.terminalSplitterNS,
             for: effectiveAppearance
         ).cgColor
     }

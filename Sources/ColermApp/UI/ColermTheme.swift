@@ -14,6 +14,10 @@ enum ColermTheme {
         light: srgb(0.955),
         dark: NSColor(srgbRed: 24 / 255, green: 24 / 255, blue: 24 / 255, alpha: 1)
     )
+    static let terminalSplitterNS = dynamic(
+        light: srgb(0.76),
+        dark: srgb(0.30)
+    )
     static let selectedTabNS = dynamic(
         light: .white,
         dark: srgb(0.125)
