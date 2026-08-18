@@ -96,6 +96,10 @@ counterpart exists only in the GitHub Actions secret and the release operator's
 Keychain. Debug builds embed Sparkle for link compatibility but do not start the
 production updater or expose its menu command.
 
+Release builds check the appcast in the background and download signed updates
+without opening Sparkle's update window. The titlebar update button appears
+after the update is staged and immediately installs it before relaunching Colerm.
+
 Updater archives and the appcast are published when the repository Actions
 variable `SPARKLE_UPDATES_ENABLED` is `true`. Leave it disabled for the initial
 release, then enable it before publishing the first newer version.

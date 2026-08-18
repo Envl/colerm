@@ -66,8 +66,8 @@ final class ColermApplication: NSObject, NSApplicationDelegate {
         let updaterController: SPUStandardUpdaterController?
         if Bundle.main.bundleIdentifier == "com.colerm.app" {
             let observer = UpdateAvailabilityObserver()
-            observer.onAvailabilityChanged = { [weak windowController] available in
-                windowController?.setUpdateAvailable(available)
+            observer.onUpdateReady = { [weak windowController] ready in
+                windowController?.setUpdateReady(ready)
             }
             observer.onUpdateError = { [weak self] error in
                 DispatchQueue.main.async { [weak self] in
@@ -83,10 +83,20 @@ final class ColermApplication: NSObject, NSApplicationDelegate {
             )
             updateAvailabilityObserver = observer
             installUpdate = { [weak updaterController, weak observer] in
+                if observer?.installAndRelaunch() == true {
+                    return
+                }
+
                 observer?.markUserInitiatedUpdateCheck()
-                updaterController?.checkForUpdates(nil)
+                guard let updater = updaterController?.updater,
+                      updater.canCheckForUpdates else {
+                    return
+                }
+                updater.checkForUpdatesInBackground()
             }
-            updaterController?.updater.checkForUpdateInformation()
+            if updaterController?.updater.automaticallyChecksForUpdates == true {
+                updaterController?.updater.checkForUpdatesInBackground()
+            }
         } else {
             updaterController = nil
             installUpdate = {}

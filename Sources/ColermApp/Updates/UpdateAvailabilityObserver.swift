@@ -2,25 +2,49 @@ import Sparkle
 
 @MainActor
 final class UpdateAvailabilityObserver: NSObject, SPUUpdaterDelegate {
-    var onAvailabilityChanged: ((Bool) -> Void)?
+    var onUpdateReady: ((Bool) -> Void)?
     var onUpdateError: ((any Error) -> Void)?
     private var userInitiatedUpdateCheck = false
+    private var immediateInstallHandler: (() -> Void)?
 
     func markUserInitiatedUpdateCheck() {
         userInitiatedUpdateCheck = true
     }
 
-    func updater(_: SPUUpdater, didFindValidUpdate _: SUAppcastItem) {
-        onAvailabilityChanged?(true)
+    @discardableResult
+    func installAndRelaunch() -> Bool {
+        guard let immediateInstallHandler else { return false }
+        userInitiatedUpdateCheck = true
+        immediateInstallHandler()
+        return true
+    }
+
+    func updater(
+        _: SPUUpdater,
+        willInstallUpdateOnQuit _: SUAppcastItem,
+        immediateInstallationBlock: @escaping () -> Void
+    ) -> Bool {
+        immediateInstallHandler = immediateInstallationBlock
+        onUpdateReady?(true)
+        return true
+    }
+
+    func updater(_: SPUUpdater, willInstallUpdate _: SUAppcastItem) {
+        onUpdateReady?(false)
     }
 
     func updaterDidNotFindUpdate(_: SPUUpdater, error _: any Error) {
         userInitiatedUpdateCheck = false
-        onAvailabilityChanged?(false)
+        immediateInstallHandler = nil
+        onUpdateReady?(false)
     }
 
     func updater(_: SPUUpdater, didAbortWithError error: any Error) {
-        guard userInitiatedUpdateCheck else { return }
+        immediateInstallHandler = nil
+        onUpdateReady?(false)
+        guard userInitiatedUpdateCheck else {
+            return
+        }
         userInitiatedUpdateCheck = false
 
         let nsError = error as NSError

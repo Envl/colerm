@@ -151,7 +151,10 @@ fi
   if [[ -n "$SPARKLE_PUBLIC_KEY" ]]; then
     printf '%s\n' '  <key>SUFeedURL</key>' "  <string>$SPARKLE_FEED_URL</string>"
     printf '%s\n' '  <key>SUPublicEDKey</key>' "  <string>$SPARKLE_PUBLIC_KEY</string>"
-    printf '%s\n' '  <key>SUEnableAutomaticChecks</key>' '  <false/>'
+    printf '%s\n' '  <key>SUEnableAutomaticChecks</key>' '  <true/>'
+    printf '%s\n' '  <key>SUAutomaticallyUpdate</key>' '  <true/>'
+    printf '%s\n' '  <key>SURequireSignedFeed</key>' '  <true/>'
+    printf '%s\n' '  <key>SUVerifyUpdateBeforeExtraction</key>' '  <true/>'
   fi
   printf '%s\n' '  <key>LSMinimumSystemVersion</key>' '  <string>14.0</string>'
   printf '%s\n' '  <key>NSHighResolutionCapable</key>' '  <true/>' '</dict>' '</plist>'

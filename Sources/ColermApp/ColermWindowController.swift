@@ -56,9 +56,10 @@ final class ColermWindowController: NSWindowController, NSWindowDelegate {
         window?.saveFrame(usingName: Self.frameAutosaveName)
     }
 
-    func setUpdateAvailable(_ available: Bool) {
-        updateButton?.isHidden = !available
-        updateButton?.toolTip = "Update Colerm"
+    func setUpdateReady(_ ready: Bool) {
+        updateButton?.isHidden = !ready
+        updateButton?.toolTip = ready ? "Restart to Update Colerm" : "Update Colerm"
+        updateButton?.setAccessibilityLabel(ready ? "Restart to Update Colerm" : "Update Colerm")
     }
 
     private func installPaletteTitlebarAccessory(in window: NSWindow) {
