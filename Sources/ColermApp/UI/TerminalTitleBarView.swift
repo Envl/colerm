@@ -11,6 +11,14 @@ struct TerminalTitleBarView: View {
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
                 .truncationMode(.middle)
+                .overlay(alignment: .bottomLeading) {
+                    if session.isActive {
+                        Capsule()
+                            .fill(TerminalAccent.forSession(session.id).color)
+                            .frame(height: 2)
+                            .offset(y: 8)
+                    }
+                }
 
             Spacer(minLength: 4)
 

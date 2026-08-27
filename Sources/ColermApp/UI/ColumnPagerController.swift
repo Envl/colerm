@@ -17,6 +17,7 @@ final class ColumnPagerController: NSViewController {
     private var splitterViews: [TerminalSessionID: TerminalSplitterView] = [:]
     private var selectionUpdate: DispatchWorkItem?
     private var lastSynchronizedSessionID: TerminalSessionID?
+    private var lastSelectionActivationID: UUID?
     private var lastSessionOrder: [TerminalSessionID] = []
     private var scrollAnimationGeneration = 0
     private var isProgrammaticScroll = false
@@ -87,13 +88,17 @@ final class ColumnPagerController: NSViewController {
         layoutDocument()
 
         let selectionChanged = lastSynchronizedSessionID != store.selectedSessionID
+        let selectionActivated = lastSelectionActivationID != store.selectionActivationID
         if selectionChanged {
             lastSynchronizedSessionID = store.selectedSessionID
         }
-        if (selectionChanged && !suppressSelectionScroll) || orderChanged {
+        if selectionActivated {
+            lastSelectionActivationID = store.selectionActivationID
+        }
+        if ((selectionChanged || selectionActivated) && !suppressSelectionScroll) || orderChanged {
             scrollToSelectedColumn()
         }
-        if selectionChanged {
+        if selectionChanged || selectionActivated {
             focusSelectedSurface()
         }
         suppressSelectionScroll = false
@@ -226,8 +231,6 @@ final class ColumnPagerController: NSViewController {
     }
 
     private func selectColumnFromPointer(_ sessionID: TerminalSessionID) {
-        // Pointer selection already happens inside the current viewport. Keep it
-        // visible while still synchronizing the selected surface and focus.
         suppressSelectionScroll = true
         store.select(sessionID)
         synchronize()

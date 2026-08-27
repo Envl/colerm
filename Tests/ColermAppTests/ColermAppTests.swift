@@ -416,6 +416,10 @@ final class ColermAppTests: XCTestCase {
         XCTAssertTrue(store.sessions[0].isActive)
         XCTAssertFalse(store.sessions[1].isActive)
 
+        let firstActivationID = store.selectionActivationID
+        store.select(first)
+        XCTAssertNotEqual(store.selectionActivationID, firstActivationID)
+
         store.select(second)
         XCTAssertTrue(store.closeSelectedColumn(confirm: false))
         XCTAssertEqual(store.sessions.map(\.id), [first])

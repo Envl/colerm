@@ -28,6 +28,7 @@ final class WorkspaceStore: ObservableObject {
 
     @Published private(set) var sessions: [TerminalSession] = []
     @Published private(set) var selectedSessionID: TerminalSessionID?
+    @Published private(set) var selectionActivationID = UUID()
     @Published private(set) var runtimeStatus: GhosttyRuntimeStatus = .stopped
     @Published private(set) var bellSessionIDs: Set<TerminalSessionID> = []
     @Published private(set) var secureInputEnabled = false
@@ -161,6 +162,7 @@ final class WorkspaceStore: ObservableObject {
 
     func select(_ sessionID: TerminalSessionID, persist: Bool = true) {
         guard sessions.contains(where: { $0.id == sessionID }) else { return }
+        selectionActivationID = UUID()
         if selectedSessionID == sessionID {
             selectedSession?.setActive(true)
             if let selectedSession {
