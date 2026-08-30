@@ -140,6 +140,14 @@ final class ColermAppTests: XCTestCase {
         XCTAssertEqual(settings.shortcut(for: .nextTerminal), AppShortcutAction.nextTerminal.defaultShortcut)
         XCTAssertEqual(settings.shortcut(for: .previousTerminal), AppShortcutAction.previousTerminal.defaultShortcut)
         XCTAssertEqual(settings.shortcut(for: .commandPalette), AppShortcutAction.commandPalette.defaultShortcut)
+        XCTAssertEqual(
+            settings.shortcut(for: .commandPalette),
+            KeyboardShortcut(
+                keyCode: UInt16(kVK_ANSI_P),
+                modifiers: [.command],
+                keyLabel: "P"
+            )
+        )
 
         let custom = KeyboardShortcut(
             keyCode: 124,
@@ -211,11 +219,15 @@ final class ColermAppTests: XCTestCase {
             isARepeat: false,
             keyCode: UInt16(kVK_ANSI_N)
         ))
+        let editor = KeyDownRecordingTextView(frame: .zero)
+        panel.contentView = editor
 
         XCTAssertTrue(panel.canBecomeKey)
         XCTAssertTrue(panel.styleMask.contains(.nonactivatingPanel))
+        XCTAssertTrue(panel.makeFirstResponder(editor))
         XCTAssertTrue(panel.ownsKeyEquivalent(commandEvent))
         XCTAssertTrue(panel.performKeyEquivalent(with: commandEvent))
+        XCTAssertEqual(editor.keyDownCallCount, 0)
     }
 
     func testRuntimeMetadataRejectsOversizedAndRemotePayloads() {
@@ -552,6 +564,15 @@ final class ColermAppTests: XCTestCase {
         engine.isRunning = true
         XCTAssertFalse(session.refreshForegroundActivity())
         XCTAssertEqual(session.processState, .running)
+    }
+}
+
+@MainActor
+private final class KeyDownRecordingTextView: NSTextView {
+    private(set) var keyDownCallCount = 0
+
+    override func keyDown(with event: NSEvent) {
+        keyDownCallCount += 1
     }
 }
 

@@ -171,7 +171,7 @@ final class TerminalCommandPalettePanelController: NSObject, NSWindowDelegate {
             @MainActor [weak self] event in
             guard let self,
                   panel.isVisible,
-                  event.window === panel || panel.isKeyWindow else { return event }
+                  event.window === panel else { return event }
             guard panel.searchFieldEditor == nil else { return event }
 
             if let editor = focusSearchField() {
@@ -236,7 +236,6 @@ final class TerminalCommandPalettePanel: NSPanel {
         guard ownsKeyEquivalent(event) else {
             return false
         }
-        searchFieldEditor?.keyDown(with: event)
         return true
     }
 

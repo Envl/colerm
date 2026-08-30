@@ -33,9 +33,9 @@ enum AppShortcutAction: String, CaseIterable, Identifiable {
             )
         case .commandPalette:
             KeyboardShortcut(
-                keyCode: UInt16(kVK_ANSI_K),
+                keyCode: UInt16(kVK_ANSI_P),
                 modifiers: [.command],
-                keyLabel: "K"
+                keyLabel: "P"
             )
         }
     }
