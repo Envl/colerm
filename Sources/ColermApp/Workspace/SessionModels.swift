@@ -90,6 +90,7 @@ final class TerminalSession: ObservableObject, Identifiable {
     @Published private(set) var columnWidth: CGFloat
 
     private var idleForegroundPID: pid_t?
+    private var shellIntegrationActivityDetected = false
 
     var view: NSView { engine.view }
     var cwd: URL? { metadata.cwd }
@@ -177,12 +178,17 @@ final class TerminalSession: ObservableObject, Identifiable {
         objectWillChange.send()
     }
 
+    func commandStarted() {
+        shellIntegrationActivityDetected = true
+        metadata.isAtPrompt = false
+        isForegroundCommandRunning = true
+        objectWillChange.send()
+    }
+
     func commandFinished(exitCode: Int32?) {
+        shellIntegrationActivityDetected = true
         metadata.lastExitCode = exitCode
         metadata.isAtPrompt = true
-        if let foregroundPID = engine.foregroundPID {
-            idleForegroundPID = foregroundPID
-        }
         isForegroundCommandRunning = false
         if let exitCode {
             processState = .running
@@ -210,6 +216,8 @@ final class TerminalSession: ObservableObject, Identifiable {
             processState = .running
             objectWillChange.send()
         }
+
+        guard !shellIntegrationActivityDetected else { return false }
 
         guard processState.isRunning,
               engine.isRunning,

@@ -596,6 +596,28 @@ final class ColermAppTests: XCTestCase {
     }
 
     @MainActor
+    func testTerminalSessionCommandEventsOverrideForegroundPIDFallback() {
+        let engine = ActivityTestEngine()
+        engine.reportedForegroundPID = 100
+        let session = TerminalSession(
+            launchOptions: SessionLaunchOptions(),
+            engine: engine
+        )
+
+        XCTAssertFalse(session.refreshForegroundActivity())
+        engine.reportedForegroundPID = 200
+        session.commandStarted()
+        XCTAssertTrue(session.isForegroundCommandRunning)
+
+        session.commandFinished(exitCode: 0)
+        XCTAssertFalse(session.isForegroundCommandRunning)
+
+        engine.reportedForegroundPID = 100
+        XCTAssertFalse(session.refreshForegroundActivity())
+        XCTAssertFalse(session.isForegroundCommandRunning)
+    }
+
+    @MainActor
     func testTerminalSessionWaitsForEngineReadiness() {
         let engine = ActivityTestEngine()
         engine.isRunning = false

@@ -11,6 +11,7 @@ enum GhosttyAction {
     case gotoColumn(Int)
     case workingDirectory(TerminalSessionID, URL)
     case title(TerminalSessionID, String)
+    case commandStarted(TerminalSessionID)
     case commandFinished(TerminalSessionID, Int32?)
     case columnMetadata(TerminalSessionID, String)
     case desktopNotification(title: String, body: String)
@@ -269,6 +270,10 @@ final class WorkspaceStore: ObservableObject {
             save()
         case .title(let sessionID, let title):
             session(for: sessionID)?.updateTitle(title)
+        case .commandStarted(let sessionID):
+            guard let session = session(for: sessionID) else { return }
+            session.commandStarted()
+            objectWillChange.send()
         case .commandFinished(let sessionID, let exitCode):
             guard let session = session(for: sessionID) else { return }
             session.commandFinished(exitCode: exitCode)

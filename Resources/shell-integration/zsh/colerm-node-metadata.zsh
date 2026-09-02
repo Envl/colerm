@@ -59,6 +59,16 @@ _colerm_report_runtime_metadata() {
   typeset -g _colerm_last_runtime_json="$json"
 }
 
+_colerm_report_command_start() {
+  builtin emulate -L zsh -o no_aliases
+  builtin printf '\033]777;notify;colerm;2:\007' >&${_ghostty_fd:-1}
+}
+
+typeset -ag preexec_functions
+if (( ${preexec_functions[(I)_colerm_report_command_start]} == 0 )); then
+  preexec_functions+=(_colerm_report_command_start)
+fi
+
 if (( $+functions[_ghostty_precmd] )); then
   functions[_ghostty_precmd]+="
         _colerm_report_runtime_metadata"

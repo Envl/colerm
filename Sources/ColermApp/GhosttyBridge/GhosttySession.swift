@@ -109,6 +109,8 @@ extension GhosttySession:
     func terminalDidRequestDesktopNotification(title: String, body: String) {
         if title == "colerm", body.hasPrefix("1:") {
             actionHandler(.columnMetadata(id, String(body.dropFirst(2))))
+        } else if title == "colerm", body == "2:" {
+            actionHandler(.commandStarted(id))
         } else {
             actionHandler(.desktopNotification(title: title, body: body))
         }
