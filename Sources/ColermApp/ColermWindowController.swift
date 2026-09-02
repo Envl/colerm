@@ -1,7 +1,10 @@
 import AppKit
+import Combine
 
 @MainActor
 final class ColermWindowController: NSWindowController, NSWindowDelegate {
+    static let minimumWindowSize = NSSize(width: 720, height: 420)
+
     private static let frameAutosaveName = NSWindow.FrameAutosaveName(
         "ColermMainWindow.\(Bundle.main.bundleIdentifier ?? "com.colerm.app")"
     )
@@ -11,6 +14,7 @@ final class ColermWindowController: NSWindowController, NSWindowDelegate {
     private let onInstallUpdate: () -> Void
     private let paletteAccessoryController = NSTitlebarAccessoryViewController()
     private weak var updateButton: UpdateTitlebarButton?
+    private var workspaceLayoutCancellable: AnyCancellable?
 
     init(
         shortcutSettings: KeyboardShortcutSettings,
@@ -34,7 +38,7 @@ final class ColermWindowController: NSWindowController, NSWindowDelegate {
         )
         window.title = Bundle.main.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String
             ?? "Colerm"
-        window.minSize = NSSize(width: 720, height: 420)
+        window.minSize = Self.minimumWindowSize
         window.isReleasedWhenClosed = false
         window.contentViewController = workspaceController
         super.init(window: window)
@@ -42,6 +46,13 @@ final class ColermWindowController: NSWindowController, NSWindowDelegate {
         window.setFrameAutosaveName(Self.frameAutosaveName)
         if !window.setFrameUsingName(Self.frameAutosaveName) {
             window.center()
+        } else {
+            ensureMinimumWindowFrame()
+        }
+        workspaceLayoutCancellable = workspaceLayoutSettings.$isVerticalTabsEnabled.sink { [weak self] _ in
+            DispatchQueue.main.async {
+                self?.ensureMinimumWindowFrame()
+            }
         }
         installPaletteTitlebarAccessory(in: window)
     }
@@ -54,8 +65,26 @@ final class ColermWindowController: NSWindowController, NSWindowDelegate {
         workspaceController.closeWindowIfAllowed()
     }
 
+    func windowDidResize(_ notification: Notification) {
+        guard let window, notification.object as? NSWindow === window else { return }
+        ensureMinimumWindowFrame()
+    }
+
     func windowWillClose(_: Notification) {
+        ensureMinimumWindowFrame()
         window?.saveFrame(usingName: Self.frameAutosaveName)
+    }
+
+    static func frameByEnforcingMinimumSize(_ frame: NSRect, minimumSize: NSSize) -> NSRect {
+        let widthDelta = max(minimumSize.width - frame.width, 0)
+        let heightDelta = max(minimumSize.height - frame.height, 0)
+        guard widthDelta > 0 || heightDelta > 0 else { return frame }
+
+        var repairedFrame = frame
+        repairedFrame.size.width += widthDelta
+        repairedFrame.size.height += heightDelta
+        repairedFrame.origin.y -= heightDelta
+        return repairedFrame
     }
 
     func setUpdateReady(_ ready: Bool) {
@@ -130,5 +159,19 @@ final class ColermWindowController: NSWindowController, NSWindowDelegate {
         button.font = .systemFont(ofSize: 12, weight: .medium)
         button.wantsLayer = true
         button.layer?.cornerRadius = 7
+    }
+
+    private func ensureMinimumWindowFrame() {
+        guard let window else { return }
+        let repairedFrame = Self.frameByEnforcingMinimumSize(
+            window.frame,
+            minimumSize: Self.minimumWindowSize
+        )
+        guard repairedFrame != window.frame else { return }
+
+        let constrainedFrame = window.screen.map {
+            window.constrainFrameRect(repairedFrame, to: $0)
+        } ?? repairedFrame
+        window.setFrame(constrainedFrame, display: false)
     }
 }

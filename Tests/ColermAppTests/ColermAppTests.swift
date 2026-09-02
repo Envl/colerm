@@ -4,6 +4,32 @@ import Carbon
 @testable import ColermApp
 
 final class ColermAppTests: XCTestCase {
+    @MainActor
+    func testMainWindowMinimumFrameRepairsShortAutosaveFrame() {
+        let savedFrame = NSRect(x: 189, y: 686, width: 945, height: 101)
+        let repairedFrame = ColermWindowController.frameByEnforcingMinimumSize(
+            savedFrame,
+            minimumSize: ColermWindowController.minimumWindowSize
+        )
+
+        XCTAssertEqual(repairedFrame.size, NSSize(width: 945, height: 420))
+        XCTAssertEqual(repairedFrame.origin.x, savedFrame.origin.x)
+        XCTAssertEqual(repairedFrame.maxY, savedFrame.maxY)
+    }
+
+    @MainActor
+    func testMainWindowMinimumFrameRepairsNarrowAutosaveFrame() {
+        let savedFrame = NSRect(x: 189, y: 101, width: 441, height: 1257)
+        let repairedFrame = ColermWindowController.frameByEnforcingMinimumSize(
+            savedFrame,
+            minimumSize: ColermWindowController.minimumWindowSize
+        )
+
+        XCTAssertEqual(repairedFrame.size, NSSize(width: 720, height: 1257))
+        XCTAssertEqual(repairedFrame.origin.x, savedFrame.origin.x)
+        XCTAssertEqual(repairedFrame.maxY, savedFrame.maxY)
+    }
+
     func testWorkspaceTabTitlePrefersCurrentFolderOverGitRoot() {
         let gitRoot = URL(fileURLWithPath: "/tmp/shell-click")
         let currentFolder = gitRoot.appendingPathComponent("website")
