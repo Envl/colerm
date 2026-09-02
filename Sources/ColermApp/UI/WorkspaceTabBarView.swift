@@ -222,7 +222,12 @@ private struct WorkspaceTab: View {
                 Circle()
                     .fill(accent)
                     .frame(width: 6, height: 6)
-                    .shadow(color: accent.opacity(0.8), radius: 5)
+                    .saturation(isSelected ? 1 : 0.3)
+                    .opacity(isSelected ? 1 : 0.45)
+                    .shadow(
+                        color: isSelected ? accent.opacity(0.8) : .clear,
+                        radius: isSelected ? 5 : 0
+                    )
 
                 Text(projectFolderName)
                     .font(.system(size: 11, weight: .medium))
