@@ -176,6 +176,52 @@ final class ColermAppTests: XCTestCase {
         )
     }
 
+    @MainActor
+    func testVerticalTabsSettingPersistsAndResets() {
+        let suiteName = "ColermAppTests.workspaceLayout.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let settings = WorkspaceLayoutSettings(defaults: defaults)
+        XCTAssertFalse(settings.isVerticalTabsEnabled)
+        XCTAssertEqual(
+            settings.verticalTabsWidth,
+            WorkspaceLayoutMetrics.defaultVerticalTabsWidth
+        )
+
+        settings.setVerticalTabsEnabled(true)
+        XCTAssertTrue(settings.isVerticalTabsEnabled)
+        settings.setVerticalTabsWidth(WorkspaceLayoutMetrics.minimumVerticalTabsWidth - 1)
+        XCTAssertEqual(
+            settings.verticalTabsWidth,
+            WorkspaceLayoutMetrics.minimumVerticalTabsWidth
+        )
+
+        let restored = WorkspaceLayoutSettings(defaults: defaults)
+        XCTAssertTrue(restored.isVerticalTabsEnabled)
+        XCTAssertEqual(
+            restored.verticalTabsWidth,
+            WorkspaceLayoutMetrics.minimumVerticalTabsWidth
+        )
+
+        restored.setVerticalTabsWidth(WorkspaceLayoutMetrics.maximumVerticalTabsWidth + 1)
+        XCTAssertEqual(
+            restored.verticalTabsWidth,
+            WorkspaceLayoutMetrics.maximumVerticalTabsWidth
+        )
+        restored.reset()
+        XCTAssertFalse(restored.isVerticalTabsEnabled)
+        XCTAssertEqual(
+            restored.verticalTabsWidth,
+            WorkspaceLayoutMetrics.defaultVerticalTabsWidth
+        )
+        XCTAssertFalse(WorkspaceLayoutSettings(defaults: defaults).isVerticalTabsEnabled)
+        XCTAssertEqual(
+            WorkspaceLayoutSettings(defaults: defaults).verticalTabsWidth,
+            WorkspaceLayoutMetrics.defaultVerticalTabsWidth
+        )
+    }
+
     func testCommandNumberShortcutsResolveAndStayReserved() {
         XCTAssertEqual(
             FixedAppShortcut.terminalNumber(

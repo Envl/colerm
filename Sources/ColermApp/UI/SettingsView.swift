@@ -1,10 +1,34 @@
 import SwiftUI
 
 struct SettingsView: View {
-    @ObservedObject var settings: KeyboardShortcutSettings
+    @ObservedObject var shortcutSettings: KeyboardShortcutSettings
+    @ObservedObject var workspaceLayoutSettings: WorkspaceLayoutSettings
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Workspace")
+                    .font(.title2.weight(.semibold))
+                Text("Choose how terminal tabs are arranged.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
+
+            VStack(spacing: 0) {
+                Toggle(
+                    "Vertical Tabs",
+                    isOn: Binding(
+                        get: { workspaceLayoutSettings.isVerticalTabsEnabled },
+                        set: { workspaceLayoutSettings.setVerticalTabsEnabled($0) }
+                    )
+                )
+                .toggleStyle(.switch)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 12)
+                .accessibilityHint("Places terminal tabs in a sidebar")
+            }
+            .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 10))
+
             VStack(alignment: .leading, spacing: 4) {
                 Text("Keyboard Shortcuts")
                     .font(.title2.weight(.semibold))
@@ -15,7 +39,7 @@ struct SettingsView: View {
 
             VStack(spacing: 0) {
                 ForEach(Array(AppShortcutAction.allCases.enumerated()), id: \.element) { index, action in
-                    ShortcutSettingsRow(settings: settings, action: action)
+                    ShortcutSettingsRow(settings: shortcutSettings, action: action)
                     if index < AppShortcutAction.allCases.count - 1 {
                         Divider().padding(.leading, 14)
                     }
@@ -26,7 +50,8 @@ struct SettingsView: View {
             HStack {
                 Spacer()
                 Button("Restore Defaults") {
-                    settings.reset()
+                    shortcutSettings.reset()
+                    workspaceLayoutSettings.reset()
                 }
             }
         }

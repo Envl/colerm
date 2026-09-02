@@ -14,6 +14,7 @@ final class ColermWindowController: NSWindowController, NSWindowDelegate {
 
     init(
         shortcutSettings: KeyboardShortcutSettings,
+        workspaceLayoutSettings: WorkspaceLayoutSettings,
         onOpenSettings: @escaping () -> Void,
         onOpenCommandPalette: @escaping () -> Void,
         onInstallUpdate: @escaping () -> Void
@@ -22,6 +23,7 @@ final class ColermWindowController: NSWindowController, NSWindowDelegate {
         self.onInstallUpdate = onInstallUpdate
         self.workspaceController = WorkspaceViewController(
             shortcutSettings: shortcutSettings,
+            workspaceLayoutSettings: workspaceLayoutSettings,
             onOpenSettings: onOpenSettings
         )
         let window = NSWindow(

@@ -2,6 +2,7 @@ import SwiftUI
 
 struct WorkspaceTabBarView: View {
     @ObservedObject var store: WorkspaceStore
+    @ObservedObject var layoutSettings: WorkspaceLayoutSettings
     let onSelectSession: (TerminalSessionID) -> Void
 
     @State private var draggedSessionID: TerminalSessionID?
@@ -16,41 +17,26 @@ struct WorkspaceTabBarView: View {
         return order.compactMap { sessionsByID[$0] }
     }
 
+    private var isVertical: Bool {
+        layoutSettings.isVerticalTabsEnabled
+    }
+
+    private var verticalTabsWidth: CGFloat {
+        layoutSettings.verticalTabsWidth
+    }
+
     var body: some View {
         ScrollViewReader { proxy in
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 0) {
-                    ForEach(displayedSessions) { session in
-                        WorkspaceTab(
-                            session: session,
-                            isSelected: store.selectedSessionID == session.id,
-                            onSelect: { onSelectSession(session.id) },
-                            onClose: { _ = store.closeColumn(session.id, confirm: false) },
-                            onNewTabLeft: { store.addColumn(toLeftOf: session.id) },
-                            onNewTabRight: { store.addColumn(toRightOf: session.id) },
-                            onDragChanged: { updateDrag(session.id, value: $0) },
-                            onDragEnded: { finishDrag(session.id) }
-                        )
-                        .id(session.id)
-                        .background {
-                            GeometryReader { geometry in
-                                Color.clear.preference(
-                                    key: WorkspaceTabFramePreferenceKey.self,
-                                    value: [session.id: geometry.frame(in: .named("workspace-tab-strip"))]
-                                )
-                            }
+            ScrollView(isVertical ? .vertical : .horizontal, showsIndicators: false) {
+                Group {
+                    if isVertical {
+                        VStack(spacing: 0) {
+                            tabItems
                         }
-                        .offset(x: draggedSessionID == session.id ? dragOffset : 0)
-                        .zIndex(draggedSessionID == session.id ? 1 : 0)
-                        .shadow(
-                            color: .black.opacity(draggedSessionID == session.id ? 0.20 : 0),
-                            radius: 7,
-                            y: 2
-                        )
-                    }
-
-                    AddWorkspaceTab {
-                        store.addColumn()
+                    } else {
+                        HStack(spacing: 0) {
+                            tabItems
+                        }
                     }
                 }
                 .coordinateSpace(name: "workspace-tab-strip")
@@ -62,6 +48,15 @@ struct WorkspaceTabBarView: View {
                     proxy.scrollTo(sessionID, anchor: .center)
                 }
             }
+            .onChange(of: layoutSettings.isVerticalTabsEnabled) { _, _ in
+                resetDrag()
+                guard let sessionID = store.selectedSessionID else { return }
+                DispatchQueue.main.async {
+                    withAnimation(.easeInOut(duration: 0.18)) {
+                        proxy.scrollTo(sessionID, anchor: .center)
+                    }
+                }
+            }
             .onAppear {
                 previewOrder = store.sessions.map(\.id)
             }
@@ -70,12 +65,57 @@ struct WorkspaceTabBarView: View {
                 previewOrder = sessionIDs
             }
         }
-        .frame(height: 36)
+        .frame(
+            width: isVertical ? verticalTabsWidth : nil,
+            height: isVertical ? nil : WorkspaceLayoutMetrics.tabHeight
+        )
         .background(ColermTheme.chrome)
-        .overlay(alignment: .bottom) {
+        .overlay(alignment: isVertical ? .trailing : .bottom) {
             Rectangle()
                 .fill(ColermTheme.separator)
-                .frame(height: 1)
+                .frame(width: isVertical ? 1 : nil, height: isVertical ? nil : 1)
+        }
+    }
+
+    @ViewBuilder
+    private var tabItems: some View {
+        ForEach(displayedSessions) { session in
+            WorkspaceTab(
+                session: session,
+                isSelected: store.selectedSessionID == session.id,
+                isVertical: isVertical,
+                verticalTabsWidth: verticalTabsWidth,
+                onSelect: { onSelectSession(session.id) },
+                onClose: { _ = store.closeColumn(session.id, confirm: false) },
+                onNewTabLeft: { store.addColumn(toLeftOf: session.id) },
+                onNewTabRight: { store.addColumn(toRightOf: session.id) },
+                onDragChanged: { updateDrag(session.id, value: $0) },
+                onDragEnded: { finishDrag(session.id) }
+            )
+            .id(session.id)
+            .background {
+                GeometryReader { geometry in
+                    Color.clear.preference(
+                        key: WorkspaceTabFramePreferenceKey.self,
+                        value: [session.id: geometry.frame(in: .named("workspace-tab-strip"))]
+                    )
+                }
+            }
+            .offset(
+                x: isVertical || draggedSessionID != session.id ? 0 : dragOffset,
+                y: isVertical && draggedSessionID == session.id ? dragOffset : 0
+            )
+            .zIndex(draggedSessionID == session.id ? 1 : 0)
+            .shadow(
+                color: .black.opacity(draggedSessionID == session.id ? 0.20 : 0),
+                radius: 7,
+                x: isVertical ? 2 : 0,
+                y: isVertical ? 0 : 2
+            )
+        }
+
+        AddWorkspaceTab(isVertical: isVertical, verticalTabsWidth: verticalTabsWidth) {
+            store.addColumn()
         }
     }
 
@@ -88,8 +128,9 @@ struct WorkspaceTabBarView: View {
         }
         guard draggedSessionID == sessionID else { return }
 
-        dragOffset += value.translation.width - lastDragTranslation
-        lastDragTranslation = value.translation.width
+        let translation = isVertical ? value.translation.height : value.translation.width
+        dragOffset += translation - lastDragTranslation
+        lastDragTranslation = translation
         swapWithCrossedNeighbor(sessionID)
     }
 
@@ -98,20 +139,22 @@ struct WorkspaceTabBarView: View {
               let draggedFrame = tabFrames[sessionID]
         else { return }
 
-        let draggedCenter = draggedFrame.midX + dragOffset
+        let draggedCenter = (isVertical ? draggedFrame.midY : draggedFrame.midX) + dragOffset
         if index > 0,
            let neighborFrame = tabFrames[previewOrder[index - 1]],
-           draggedCenter < neighborFrame.midX {
+           draggedCenter < (isVertical ? neighborFrame.midY : neighborFrame.midX) {
+            let neighborExtent = isVertical ? neighborFrame.height : neighborFrame.width
             withAnimation(.interactiveSpring(response: 0.18, dampingFraction: 0.86)) {
                 previewOrder.swapAt(index, index - 1)
-                dragOffset += neighborFrame.width
+                dragOffset += neighborExtent
             }
         } else if index < previewOrder.count - 1,
                   let neighborFrame = tabFrames[previewOrder[index + 1]],
-                  draggedCenter > neighborFrame.midX {
+                  draggedCenter > (isVertical ? neighborFrame.midY : neighborFrame.midX) {
+            let neighborExtent = isVertical ? neighborFrame.height : neighborFrame.width
             withAnimation(.interactiveSpring(response: 0.18, dampingFraction: 0.86)) {
                 previewOrder.swapAt(index, index + 1)
-                dragOffset -= neighborFrame.width
+                dragOffset -= neighborExtent
             }
         }
     }
@@ -158,6 +201,8 @@ private struct WorkspaceTabFramePreferenceKey: PreferenceKey {
 private struct WorkspaceTab: View {
     @ObservedObject var session: TerminalSession
     let isSelected: Bool
+    let isVertical: Bool
+    let verticalTabsWidth: CGFloat
     let onSelect: () -> Void
     let onClose: () -> Void
     let onNewTabLeft: () -> Void
@@ -194,7 +239,11 @@ private struct WorkspaceTab: View {
                 Spacer(minLength: 26)
             }
             .padding(.horizontal, 18)
-            .frame(minWidth: 170, maxHeight: .infinity)
+            .frame(
+                minWidth: isVertical ? 0 : 170,
+                maxWidth: isVertical ? .infinity : nil,
+                maxHeight: .infinity
+            )
             .contentShape(Rectangle())
             .onTapGesture(perform: onSelect)
             .highPriorityGesture(
@@ -216,19 +265,22 @@ private struct WorkspaceTab: View {
             .padding(.trailing, 7)
             .help("Close Terminal")
         }
-        .frame(height: 36)
+        .frame(
+            width: isVertical ? verticalTabsWidth : nil,
+            height: WorkspaceLayoutMetrics.tabHeight
+        )
         .background(tabBackground)
-        .overlay(alignment: .trailing) {
+        .overlay(alignment: isVertical ? .bottom : .trailing) {
             Rectangle()
                 .fill(ColermTheme.separator)
-                .frame(width: 1)
+                .frame(width: isVertical ? nil : 1, height: isVertical ? 1 : nil)
         }
-        .overlay(alignment: .bottom) {
+        .overlay(alignment: isVertical ? .leading : .bottom) {
             if isSelected {
                 Capsule()
                     .fill(accent)
-                    .frame(height: 2)
-                    .padding(.horizontal, 18)
+                    .frame(width: isVertical ? 2 : nil, height: isVertical ? 20 : 2)
+                    .padding(.horizontal, isVertical ? 0 : 18)
             }
         }
         .onHover { isHovered = $0 }
@@ -255,6 +307,8 @@ private struct WorkspaceTab: View {
 }
 
 private struct AddWorkspaceTab: View {
+    let isVertical: Bool
+    let verticalTabsWidth: CGFloat
     let action: () -> Void
 
     @State private var isHovered = false
@@ -263,16 +317,19 @@ private struct AddWorkspaceTab: View {
         Button(action: action) {
             Image(systemName: "plus")
                 .font(.system(size: 15, weight: .medium))
-                .frame(width: 48, height: 36)
+                .frame(
+                    width: isVertical ? verticalTabsWidth : 48,
+                    height: WorkspaceLayoutMetrics.tabHeight
+                )
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .foregroundStyle(isHovered ? ColermTheme.primaryText : ColermTheme.secondaryText)
         .background(isHovered ? ColermTheme.primaryText.opacity(0.045) : .clear)
-        .overlay(alignment: .trailing) {
+        .overlay(alignment: isVertical ? .bottom : .trailing) {
             Rectangle()
                 .fill(ColermTheme.separator)
-                .frame(width: 1)
+                .frame(width: isVertical ? nil : 1, height: isVertical ? 1 : nil)
         }
         .onHover { isHovered = $0 }
         .help("New Terminal")

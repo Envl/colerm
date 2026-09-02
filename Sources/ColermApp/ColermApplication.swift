@@ -7,6 +7,7 @@ final class ColermApplication: NSObject, NSApplicationDelegate {
     private var settingsWindowController: SettingsWindowController?
     private var commandPaletteController: TerminalCommandPalettePanelController?
     private var shortcutSettings: KeyboardShortcutSettings?
+    private var workspaceLayoutSettings: WorkspaceLayoutSettings?
     private var shortcutMonitor: AppShortcutMonitor?
     private var commandRouter: WorkspaceCommandRouter?
     private var updaterController: SPUStandardUpdaterController?
@@ -16,11 +17,16 @@ final class ColermApplication: NSObject, NSApplicationDelegate {
         NSApp.setActivationPolicy(.regular)
 
         let shortcutSettings = KeyboardShortcutSettings()
-        let settingsWindowController = SettingsWindowController(settings: shortcutSettings)
+        let workspaceLayoutSettings = WorkspaceLayoutSettings()
+        let settingsWindowController = SettingsWindowController(
+            shortcutSettings: shortcutSettings,
+            workspaceLayoutSettings: workspaceLayoutSettings
+        )
         var openCommandPalette: (() -> Void)?
         var installUpdate: (() -> Void)?
         let windowController = ColermWindowController(
             shortcutSettings: shortcutSettings,
+            workspaceLayoutSettings: workspaceLayoutSettings,
             onOpenSettings: { [weak settingsWindowController] in
                 settingsWindowController?.show()
             },
@@ -60,6 +66,7 @@ final class ColermApplication: NSObject, NSApplicationDelegate {
         self.settingsWindowController = settingsWindowController
         self.commandPaletteController = commandPaletteController
         self.shortcutSettings = shortcutSettings
+        self.workspaceLayoutSettings = workspaceLayoutSettings
         self.shortcutMonitor = shortcutMonitor
         self.commandRouter = commandRouter
 
