@@ -216,17 +216,21 @@ private struct WorkspaceTab: View {
         TerminalAccent.forSession(session.id).color
     }
 
+    private var isDotLit: Bool {
+        isSelected || session.isForegroundCommandRunning
+    }
+
     var body: some View {
         ZStack(alignment: .trailing) {
             HStack(spacing: 8) {
                 Circle()
                     .fill(accent)
                     .frame(width: 6, height: 6)
-                    .saturation(isSelected ? 1 : 0.3)
-                    .opacity(isSelected ? 1 : 0.45)
+                    .saturation(isDotLit ? 1 : 0.3)
+                    .opacity(isDotLit ? 1 : 0.45)
                     .shadow(
-                        color: isSelected ? accent.opacity(0.8) : .clear,
-                        radius: isSelected ? 5 : 0
+                        color: isDotLit ? accent.opacity(0.8) : .clear,
+                        radius: isDotLit ? 5 : 0
                     )
 
                 Text(projectFolderName)
