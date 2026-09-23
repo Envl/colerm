@@ -14,6 +14,10 @@ enum ColermTheme {
         light: srgb(0.955),
         dark: NSColor(srgbRed: 24 / 255, green: 24 / 255, blue: 24 / 255, alpha: 1)
     )
+    static let terminalTitleTextNS = dynamic(
+        light: srgb(0.32),
+        dark: .secondaryLabelColor
+    )
     static let terminalSplitterNS = dynamic(
         light: srgb(0.76),
         dark: srgb(0.30)
@@ -50,6 +54,7 @@ enum ColermTheme {
     static var workspaceBackground: Color { Color(nsColor: workspaceBackgroundNS) }
     static var chrome: Color { Color(nsColor: chromeNS) }
     static var terminalTitle: Color { Color(nsColor: terminalTitleNS) }
+    static var terminalTitleText: Color { Color(nsColor: terminalTitleTextNS) }
     static var selectedTab: Color { Color(nsColor: selectedTabNS) }
     static var paletteCanvas: Color { Color(nsColor: paletteCanvasNS) }
     static var paletteRaised: Color { Color(nsColor: paletteRaisedNS) }

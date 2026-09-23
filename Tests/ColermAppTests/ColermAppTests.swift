@@ -346,6 +346,8 @@ final class ColermAppTests: XCTestCase {
         let lightAppearance = try XCTUnwrap(NSAppearance(named: .aqua))
         let dark = ColermTheme.resolved(ColermTheme.terminalTitleNS, for: darkAppearance)
         let light = ColermTheme.resolved(ColermTheme.terminalTitleNS, for: lightAppearance)
+        let darkTitleText = ColermTheme.resolved(ColermTheme.terminalTitleTextNS, for: darkAppearance)
+        let lightTitleText = ColermTheme.resolved(ColermTheme.terminalTitleTextNS, for: lightAppearance)
         let darkSplitter = ColermTheme.resolved(ColermTheme.terminalSplitterNS, for: darkAppearance)
         let lightSplitter = ColermTheme.resolved(ColermTheme.terminalSplitterNS, for: lightAppearance)
 
@@ -366,6 +368,20 @@ final class ColermAppTests: XCTestCase {
         XCTAssertGreaterThan(lightRed, 0.9)
         XCTAssertGreaterThan(lightGreen, 0.9)
         XCTAssertGreaterThan(lightBlue, 0.9)
+
+        var lightTitleTextRed: CGFloat = 0
+        var lightTitleTextGreen: CGFloat = 0
+        var lightTitleTextBlue: CGFloat = 0
+        lightTitleText.getRed(
+            &lightTitleTextRed,
+            green: &lightTitleTextGreen,
+            blue: &lightTitleTextBlue,
+            alpha: nil
+        )
+        XCTAssertEqual(lightTitleTextRed, 0.32, accuracy: 0.001)
+        XCTAssertEqual(lightTitleTextGreen, 0.32, accuracy: 0.001)
+        XCTAssertEqual(lightTitleTextBlue, 0.32, accuracy: 0.001)
+        XCTAssertNotEqual(darkTitleText, lightTitleText)
 
         var darkSplitterRed: CGFloat = 0
         var lightSplitterRed: CGFloat = 0

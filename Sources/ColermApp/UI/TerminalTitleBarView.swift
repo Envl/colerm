@@ -8,7 +8,7 @@ struct TerminalTitleBarView: View {
         HStack(spacing: 8) {
             Text(displayPath)
                 .font(.system(size: 11, weight: .medium, design: .monospaced))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(ColermTheme.terminalTitleText)
                 .lineLimit(1)
                 .truncationMode(.middle)
                 .overlay(alignment: .bottomLeading) {
@@ -87,7 +87,7 @@ private struct GitSummaryView: View {
             }
         }
         .font(.system(size: 10, weight: .medium, design: .monospaced))
-        .foregroundStyle(.secondary)
+        .foregroundStyle(ColermTheme.terminalTitleText)
         .labelStyle(.titleAndIcon)
         .help(gitHelp)
     }
