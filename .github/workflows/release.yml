@@ -27,20 +27,24 @@ jobs:
           persist-credentials: false
           submodules: recursive
 
-      - name: Select Swift 6 toolchain
+      - name: Select Swift 6.2 toolchain
         shell: bash
         run: |
           set -euo pipefail
-          xcode_path=/Applications/Xcode_16.4.app
+          xcode_version=26.3
+          xcode_path="/Applications/Xcode_$xcode_version.app"
           [[ -d "$xcode_path" ]] || {
-            echo "Expected Xcode 16.4 at $xcode_path" >&2
+            echo "Expected Xcode $xcode_version at $xcode_path" >&2
             exit 1
           }
           sudo xcode-select --switch "$xcode_path"
           xcodebuild -version
           swift_version="$(swift --version)"
           printf '%s\n' "$swift_version"
-          grep -q 'Swift version 6' <<<"$swift_version"
+          grep -Eq 'Swift version 6\.2([.]|[[:space:]])' <<<"$swift_version" || {
+            echo "Expected Swift 6.2 for the Ghostty dependency" >&2
+            exit 1
+          }
 
       - name: Validate release version
         shell: bash

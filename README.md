@@ -42,7 +42,7 @@ are isolated in `Sources/ColermApp/GhosttyBridge`.
 ## Requirements
 
 - macOS 14 or newer.
-- Swift 6 toolchain and Xcode Command Line Tools.
+- Swift 6.2 or newer and Xcode Command Line Tools.
 - Node.js and pnpm for the website.
 - Zig only when validating the optional vendored Ghostty source build.
 
