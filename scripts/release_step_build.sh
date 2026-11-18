@@ -60,8 +60,10 @@ if [[ "$UNIVERSAL" == true ]]; then
   swift build -c "$SWIFT_CONFIGURATION" --triple arm64-apple-macosx --scratch-path "$ARM64_SCRATCH"
   swift build -c "$SWIFT_CONFIGURATION" --triple x86_64-apple-macosx --scratch-path "$X86_64_SCRATCH"
 
-  ARM64_BIN="$(swift build -c "$SWIFT_CONFIGURATION" --triple arm64-apple-macosx --scratch-path "$ARM64_SCRATCH" --show-bin-path)/ColermApp"
-  X86_64_BIN="$(swift build -c "$SWIFT_CONFIGURATION" --triple x86_64-apple-macosx --scratch-path "$X86_64_SCRATCH" --show-bin-path)/ColermApp"
+  ARM64_BIN_DIR="$(swift build -c "$SWIFT_CONFIGURATION" --triple arm64-apple-macosx --scratch-path "$ARM64_SCRATCH" --show-bin-path)"
+  X86_64_BIN_DIR="$(swift build -c "$SWIFT_CONFIGURATION" --triple x86_64-apple-macosx --scratch-path "$X86_64_SCRATCH" --show-bin-path)"
+  ARM64_BIN="$ARM64_BIN_DIR/ColermApp"
+  X86_64_BIN="$X86_64_BIN_DIR/ColermApp"
   BIN="$ROOT/dist/ColermApp-universal"
   mkdir -p "$ROOT/dist"
   lipo -create "$ARM64_BIN" "$X86_64_BIN" -output "$BIN"
@@ -72,10 +74,13 @@ if [[ "$UNIVERSAL" == true ]]; then
     exit 1
   }
   SPARKLE_ARTIFACT_ROOT="$ARM64_SCRATCH"
+  GHOSTTY_BUNDLE="$ARM64_BIN_DIR/GhosttyKit_GhosttyTerminal.bundle"
 else
   swift build -c "$SWIFT_CONFIGURATION"
-  BIN="$ROOT/.build/$SWIFT_CONFIGURATION/ColermApp"
+  BIN_DIR="$(swift build -c "$SWIFT_CONFIGURATION" --show-bin-path)"
+  BIN="$BIN_DIR/ColermApp"
   SPARKLE_ARTIFACT_ROOT="$ROOT/.build"
+  GHOSTTY_BUNDLE="$BIN_DIR/GhosttyKit_GhosttyTerminal.bundle"
 fi
 mkdir -p "$ROOT/dist"
 BUILD_ARGS=(
@@ -89,6 +94,11 @@ BUILD_ARGS=(
 if [[ -n "$BUILD_NUMBER" ]]; then
   BUILD_ARGS+=(--build-number "$BUILD_NUMBER")
 fi
+[[ -d "$GHOSTTY_BUNDLE" ]] || {
+  echo "GhosttyKit_GhosttyTerminal.bundle was not built by SwiftPM: $GHOSTTY_BUNDLE" >&2
+  exit 1
+}
+BUILD_ARGS+=(--ghostty-bundle "$GHOSTTY_BUNDLE")
 SPARKLE_FRAMEWORK="$SPARKLE_ARTIFACT_ROOT/artifacts/sparkle/Sparkle/Sparkle.xcframework/macos-arm64_x86_64/Sparkle.framework"
 [[ -d "$SPARKLE_FRAMEWORK" ]] || {
   echo "Sparkle.framework was not resolved by SwiftPM" >&2

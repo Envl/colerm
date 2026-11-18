@@ -57,6 +57,9 @@ final class ColermApplication: NSObject, NSApplicationDelegate {
             },
             selectTerminal: { [weak workspace] number in
                 workspace?.selectColumn(number: number)
+            },
+            findInDiffs: { [weak workspace] in
+                workspace?.findInDiffs() ?? false
             }
         )
         let commandRouter = WorkspaceCommandRouter()
@@ -151,6 +154,22 @@ final class ColermApplication: NSObject, NSApplicationDelegate {
         fileMenu.addItem(menuItem("Close Column", action: #selector(WorkspaceCommandRouter.closeColumn(_:)), key: "w", router: router))
         fileMenuItem.submenu = fileMenu
         mainMenu.addItem(fileMenuItem)
+
+        let editMenuItem = NSMenuItem()
+        let editMenu = NSMenu(title: "Edit")
+        editMenu.addItem(withTitle: "Undo", action: Selector(("undo:")), keyEquivalent: "z")
+        let redoItem = NSMenuItem(title: "Redo", action: Selector(("redo:")), keyEquivalent: "Z")
+        redoItem.keyEquivalentModifierMask = [.command, .shift]
+        editMenu.addItem(redoItem)
+        editMenu.addItem(.separator())
+        editMenu.addItem(withTitle: "Cut", action: #selector(NSText.cut(_:)), keyEquivalent: "x")
+        editMenu.addItem(withTitle: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
+        editMenu.addItem(menuItem("Paste", action: #selector(WorkspaceCommandRouter.paste(_:)), key: "v", router: router))
+        editMenu.addItem(withTitle: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
+        editMenu.addItem(.separator())
+        editMenu.addItem(menuItem("Find in Diffs…", action: #selector(WorkspaceCommandRouter.findInDiffs(_:)), key: "f", router: router))
+        editMenuItem.submenu = editMenu
+        mainMenu.addItem(editMenuItem)
 
         let navigateMenuItem = NSMenuItem()
         let navigateMenu = NSMenu(title: "Navigate")

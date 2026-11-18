@@ -9,6 +9,9 @@ class TitlebarPillButton: NSButton {
     var normalBackgroundColor: NSColor { .quaternaryLabelColor }
     var hoverBackgroundColor: NSColor { .tertiaryLabelColor }
 
+    // The custom background fills the frame for both icon-only and titled buttons.
+    override var alignmentRectInsets: NSEdgeInsets { NSEdgeInsetsZero }
+
     override func updateTrackingAreas() {
         super.updateTrackingAreas()
         if let hoverTrackingArea {

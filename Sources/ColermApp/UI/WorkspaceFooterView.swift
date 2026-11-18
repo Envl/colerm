@@ -4,6 +4,8 @@ struct WorkspaceFooterView: View {
     @ObservedObject var store: WorkspaceStore
     @ObservedObject var shortcutSettings: KeyboardShortcutSettings
 
+    private let footerFont = Font.system(size: 10, weight: .regular, design: .monospaced)
+
     var body: some View {
         HStack(spacing: 10) {
             Circle()
@@ -29,10 +31,12 @@ struct WorkspaceFooterView: View {
                         }
                     } label: {
                         Text("\(activeCount) running")
+                            .font(footerFont)
                             .foregroundStyle(ColermTheme.secondaryText)
                             .fixedSize(horizontal: true, vertical: true)
                     }
                     .menuStyle(.borderlessButton)
+                    .font(footerFont)
                     .menuIndicator(.hidden)
                     .fixedSize(horizontal: true, vertical: true)
                     .help("Jump to a running terminal")
@@ -48,7 +52,7 @@ struct WorkspaceFooterView: View {
                 .foregroundStyle(ColermTheme.secondaryText)
         }
         .padding(.horizontal, 16)
-        .font(.system(size: 10, weight: .regular, design: .monospaced))
+        .font(footerFont)
         .foregroundStyle(ColermTheme.secondaryText)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(ColermTheme.chrome)

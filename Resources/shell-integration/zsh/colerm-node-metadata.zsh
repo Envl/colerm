@@ -61,7 +61,12 @@ _colerm_report_runtime_metadata() {
 
 _colerm_report_command_start() {
   builtin emulate -L zsh -o no_aliases
-  builtin printf '\033]777;notify;colerm;2:\007' >&${_ghostty_fd:-1}
+  builtin local cmd="${3:-${1:-}}" encoded=""
+  cmd="${cmd[1,512]}"
+  if [[ -n "$cmd" ]]; then
+    encoded="$(builtin print -rn -- "$cmd" | /usr/bin/base64 | /usr/bin/tr -d '\n' 2>/dev/null)" || encoded=""
+  fi
+  builtin printf '\033]777;notify;colerm;2:%s\007' "$encoded" >&${_ghostty_fd:-1}
 }
 
 typeset -ag preexec_functions

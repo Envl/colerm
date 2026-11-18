@@ -5,6 +5,16 @@ struct TerminalPaletteItem: Identifiable, Equatable {
     let index: Int
     let title: String
     let path: String
+    var agentStatus: AgentSessionStatus? = nil
+
+    var searchableFields: [String] {
+        var fields = [title, path]
+        if let agentStatus, agentStatus.isVisibleInTab {
+            fields.append(agentStatus.badgeLabel)
+            fields.append(agentStatus.helpText)
+        }
+        return fields
+    }
 }
 
 enum TerminalPaletteSearch {
@@ -21,7 +31,7 @@ enum TerminalPaletteSearch {
             .enumerated()
             .filter { _, item in
                 terms.allSatisfy { term in
-                    [item.title, item.path].contains { value in
+                    item.searchableFields.contains { value in
                         SearchTextMatcher.matches(value, term: term)
                     }
                 }

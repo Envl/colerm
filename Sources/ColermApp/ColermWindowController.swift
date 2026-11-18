@@ -10,6 +10,7 @@ final class ColermWindowController: NSWindowController, NSWindowDelegate {
     )
 
     let workspaceController: WorkspaceViewController
+    private let onOpenSettings: () -> Void
     private let onOpenCommandPalette: () -> Void
     private let onInstallUpdate: () -> Void
     private let paletteAccessoryController = NSTitlebarAccessoryViewController()
@@ -23,6 +24,7 @@ final class ColermWindowController: NSWindowController, NSWindowDelegate {
         onOpenCommandPalette: @escaping () -> Void,
         onInstallUpdate: @escaping () -> Void
     ) {
+        self.onOpenSettings = onOpenSettings
         self.onOpenCommandPalette = onOpenCommandPalette
         self.onInstallUpdate = onInstallUpdate
         self.workspaceController = WorkspaceViewController(
@@ -108,6 +110,18 @@ final class ColermWindowController: NSWindowController, NSWindowDelegate {
         searchButton.toolTip = "Search Open Terminals"
         searchButton.setAccessibilityLabel("Search Open Terminals")
 
+        let settingsButton = PaletteTitlebarButton(
+            title: "",
+            target: self,
+            action: #selector(openSettings(_:))
+        )
+        settingsButton.image = NSImage(systemSymbolName: "gearshape", accessibilityDescription: "Settings")
+        configureTitlebarButton(settingsButton)
+        settingsButton.imagePosition = .imageOnly
+        settingsButton.updateAppearance()
+        settingsButton.toolTip = "Settings"
+        settingsButton.setAccessibilityLabel("Settings")
+
         let updateButton = UpdateTitlebarButton(
             title: "Update",
             target: self,
@@ -124,18 +138,23 @@ final class ColermWindowController: NSWindowController, NSWindowDelegate {
         updateButton.isHidden = true
         self.updateButton = updateButton
 
-        let container = NSView(frame: NSRect(x: 0, y: 0, width: 174, height: 28))
+        let container = NSView(frame: NSRect(x: 0, y: 0, width: 204, height: 28))
         container.addSubview(updateButton)
         container.addSubview(searchButton)
+        container.addSubview(settingsButton)
         NSLayoutConstraint.activate([
             updateButton.leadingAnchor.constraint(equalTo: container.leadingAnchor),
             updateButton.centerYAnchor.constraint(equalTo: container.centerYAnchor),
             updateButton.widthAnchor.constraint(equalToConstant: 78),
             updateButton.heightAnchor.constraint(equalToConstant: 18),
-            searchButton.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -6),
+            searchButton.trailingAnchor.constraint(equalTo: settingsButton.leadingAnchor, constant: -6),
             searchButton.centerYAnchor.constraint(equalTo: container.centerYAnchor),
             searchButton.widthAnchor.constraint(equalToConstant: 84),
             searchButton.heightAnchor.constraint(equalToConstant: 18),
+            settingsButton.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -6),
+            settingsButton.centerYAnchor.constraint(equalTo: container.centerYAnchor),
+            settingsButton.widthAnchor.constraint(equalToConstant: 24),
+            settingsButton.heightAnchor.constraint(equalTo: searchButton.heightAnchor),
         ])
 
         paletteAccessoryController.layoutAttribute = .right
@@ -145,6 +164,10 @@ final class ColermWindowController: NSWindowController, NSWindowDelegate {
 
     @objc private func openCommandPalette(_: Any?) {
         onOpenCommandPalette()
+    }
+
+    @objc private func openSettings(_: Any?) {
+        onOpenSettings()
     }
 
     @objc private func installUpdate(_: Any?) {

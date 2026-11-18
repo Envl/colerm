@@ -16,7 +16,7 @@ let package = Package(
     dependencies: [
         .package(
             url: "https://github.com/Lakr233/libghostty-spm.git",
-            exact: "1.3.2"
+            exact: "2.2.2026111701"
         ),
         .package(
             url: "https://github.com/sparkle-project/Sparkle.git",
@@ -27,6 +27,7 @@ let package = Package(
         .executableTarget(
             name: "ColermApp",
             dependencies: [
+                .product(name: "GhosttyKit", package: "libghostty-spm"),
                 .product(name: "GhosttyTerminal", package: "libghostty-spm"),
                 .product(name: "Sparkle", package: "Sparkle")
             ],

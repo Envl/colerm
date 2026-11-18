@@ -675,6 +675,1253 @@ final class ColermAppTests: XCTestCase {
         XCTAssertFalse(session.refreshForegroundActivity())
         XCTAssertEqual(session.processState, .running)
     }
+
+    func testGitBranchParserSeparatesLocalAndUncheckedOutRemoteBranches() {
+        let output = [
+            "refs/heads/main\tmain\t*\t",
+            "refs/heads/feature/ui\tfeature/ui\t \t",
+            "refs/remotes/origin/HEAD\torigin\t \trefs/remotes/origin/main",
+            "refs/remotes/origin/main\torigin/main\t \t",
+            "refs/remotes/origin/release/1.0\torigin/release/1.0\t \t"
+        ].joined(separator: "\n")
+
+        let parsed = GitBranchParser.parse(
+            output,
+            currentBranch: "main",
+            isDetachedHead: false
+        )
+
+        XCTAssertEqual(
+            parsed.localBranches,
+            [
+                GitBranch(name: "feature/ui", localName: "feature/ui", isRemote: false, isCurrent: false),
+                GitBranch(name: "main", localName: "main", isRemote: false, isCurrent: true)
+            ]
+        )
+        XCTAssertEqual(
+            parsed.remoteBranches,
+            [
+                GitBranch(
+                    name: "origin/release/1.0",
+                    localName: "release/1.0",
+                    isRemote: true,
+                    isCurrent: false
+                )
+            ]
+        )
+    }
+
+    @MainActor
+    func testBranchMenuPresenterBuildsCheckedLocalAndRemoteSubmenu() throws {
+        let branchList = GitBranchList(
+            currentBranch: "main",
+            isDetachedHead: false,
+            localBranches: [
+                GitBranch(name: "feature/diffs", localName: "feature/diffs", isRemote: false, isCurrent: false),
+                GitBranch(name: "main", localName: "main", isRemote: false, isCurrent: true)
+            ],
+            remoteBranches: [
+                GitBranch(name: "origin/hotfix", localName: "hotfix", isRemote: true, isCurrent: false)
+            ]
+        )
+
+        var selectedBranches: [GitBranch] = []
+        let menu = BranchMenuPresenter.buildMenu(from: branchList) { branch in
+            selectedBranches.append(branch)
+        }
+
+        XCTAssertEqual(menu.items.count, 4)
+        XCTAssertEqual(menu.items[0].title, "feature/diffs")
+        XCTAssertEqual(menu.items[0].state, .off)
+        XCTAssertEqual(menu.items[1].title, "main")
+        XCTAssertEqual(menu.items[1].state, .on)
+        XCTAssertTrue(menu.items[2].isSeparatorItem)
+        XCTAssertEqual(menu.items[3].title, "Remote Branches")
+
+        // Clicking current branch is a no-op
+        _ = menu.items[1].target?.perform(menu.items[1].action, with: menu.items[1])
+        XCTAssertTrue(selectedBranches.isEmpty)
+
+        // Clicking another local branch triggers switch
+        _ = menu.items[0].target?.perform(menu.items[0].action, with: menu.items[0])
+        XCTAssertEqual(selectedBranches.map(\.name), ["feature/diffs"])
+
+        // Clicking remote submenu branch triggers switch
+        let remoteItem = try XCTUnwrap(menu.items[3].submenu?.items.first)
+        _ = remoteItem.target?.perform(remoteItem.action, with: remoteItem)
+        XCTAssertEqual(selectedBranches.map(\.name), ["feature/diffs", "origin/hotfix"])
+    }
+
+    func testGitDiffParserHandlesModifiedRenamedBinaryAndSpacesInPaths() {
+        let diff = """
+        diff --git a/Docs/Release Notes.md b/Docs/Release Notes.md
+        index 1111111..2222222 100644
+        --- a/Docs/Release Notes.md
+        +++ b/Docs/Release Notes.md
+        @@ -1,3 +1,4 @@
+         # Release
+        -Old line
+        +New line
+        +Added line
+         Footer
+        diff --git a/Sources/Old.swift b/Sources/New.swift
+        similarity index 100%
+        rename from Sources/Old.swift
+        rename to Sources/New.swift
+        diff --git a/Assets/logo.png b/Assets/logo.png
+        index 3333333..4444444 100644
+        Binary files a/Assets/logo.png and b/Assets/logo.png differ
+        """
+
+        let files = GitDiffParser.parseUnifiedDiff(diff)
+        XCTAssertEqual(files.count, 3)
+
+        XCTAssertEqual(files[0].path, "Docs/Release Notes.md")
+        XCTAssertEqual(files[0].kind, .modified)
+        XCTAssertEqual(files[0].insertions, 2)
+        XCTAssertEqual(files[0].deletions, 1)
+        XCTAssertEqual(files[0].hunks.count, 1)
+        XCTAssertEqual(files[0].hunks[0].lines.map(\.oldLineNumber), [1, 2, nil, nil, 3])
+        XCTAssertEqual(files[0].hunks[0].lines.map(\.newLineNumber), [1, nil, 2, 3, 4])
+
+        XCTAssertEqual(files[1].path, "Sources/New.swift")
+        XCTAssertEqual(files[1].oldPath, "Sources/Old.swift")
+        XCTAssertEqual(files[1].kind, .renamed)
+
+        XCTAssertEqual(files[2].path, "Assets/logo.png")
+        XCTAssertTrue(files[2].isBinary)
+    }
+
+    @MainActor
+    func testWorkspaceSwitchBranchUpdatesSessionGitMetadataAndReportsConflicts() async throws {
+        let fixtureName = "ColumnBranchSwitch-\(UUID().uuidString)"
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(fixtureName, isDirectory: true)
+        let persistenceURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("\(fixtureName).json")
+        defer {
+            try? FileManager.default.removeItem(at: directory)
+            try? FileManager.default.removeItem(at: persistenceURL)
+        }
+
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try runGit(arguments: ["-C", directory.path, "init", "-q", "-b", "main"])
+        try runGit(arguments: ["-C", directory.path, "config", "user.email", "test@example.com"])
+        try runGit(arguments: ["-C", directory.path, "config", "user.name", "Colerm Test"])
+
+        let trackedFile = directory.appendingPathComponent("file.txt")
+        try "main content\n".write(to: trackedFile, atomically: true, encoding: .utf8)
+        try runGit(arguments: ["-C", directory.path, "add", "file.txt"])
+        try runGit(arguments: ["-C", directory.path, "commit", "-q", "-m", "Initial"])
+
+        try runGit(arguments: ["-C", directory.path, "switch", "-q", "-c", "feature"])
+        try "feature content\n".write(to: trackedFile, atomically: true, encoding: .utf8)
+        try runGit(arguments: ["-C", directory.path, "commit", "-q", "-am", "Feature change"])
+        try runGit(arguments: ["-C", directory.path, "switch", "-q", "main"])
+
+        let sessionID = UUID()
+        let persistence = WorkspacePersistence(fileURL: persistenceURL)
+        try persistence.save(
+            PersistedWorkspace(
+                selectedSessionID: sessionID,
+                sessions: [
+                    PersistedSession(id: sessionID, cwd: directory, columnWidth: 600)
+                ]
+            )
+        )
+
+        let store = WorkspaceStore(
+            persistence: persistence,
+            runtime: GhosttyRuntime(),
+            gitInspector: GitInspector(cacheLifetime: 60, debounceMilliseconds: 0)
+        )
+        try await waitForGitBranch(on: store.sessions[0], branch: "main")
+
+        let rawBranches = await store.listBranches(for: sessionID)
+        let branches = try XCTUnwrap(rawBranches)
+        XCTAssertEqual(branches.localBranches.map(\.name), ["feature", "main"])
+
+        let featureBranch = try XCTUnwrap(branches.localBranches.first { $0.name == "feature" })
+        let switchResult = await store.switchBranch(to: featureBranch, for: sessionID)
+        XCTAssertNoThrow(try switchResult.get())
+        try await waitForGitBranch(on: store.sessions[0], branch: "feature")
+
+        // Create conflicting uncommitted change and verify failure when switching back to main
+        try "conflicting dirty change\n".write(to: trackedFile, atomically: true, encoding: .utf8)
+        let mainBranch = GitBranch(name: "main", localName: "main", isRemote: false, isCurrent: false)
+        let conflictResult = await store.switchBranch(to: mainBranch, for: sessionID)
+        if case .success = conflictResult {
+            XCTFail("Expected conflicting git switch to fail")
+        }
+    }
+
+    @MainActor
+    func testColumnPagerExtendsRightDiffSidebarBesideTerminalWithoutShrinkingTerminal() async throws {
+        let fixtureName = "ColumnDiffSidebar-\(UUID().uuidString)"
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(fixtureName, isDirectory: true)
+        let persistenceURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("\(fixtureName).json")
+        defer {
+            try? FileManager.default.removeItem(at: directory)
+            try? FileManager.default.removeItem(at: persistenceURL)
+        }
+
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try runGit(arguments: ["-C", directory.path, "init", "-q", "-b", "main"])
+        try runGit(arguments: ["-C", directory.path, "config", "user.email", "test@example.com"])
+        try runGit(arguments: ["-C", directory.path, "config", "user.name", "Colerm Test"])
+
+        let trackedFile = directory.appendingPathComponent("tracked.swift")
+        try "let value = 1\n".write(to: trackedFile, atomically: true, encoding: .utf8)
+        try runGit(arguments: ["-C", directory.path, "add", "tracked.swift"])
+        try runGit(arguments: ["-C", directory.path, "commit", "-q", "-m", "Initial"])
+
+        try "let value = 2\nlet extra = true\n".write(to: trackedFile, atomically: true, encoding: .utf8)
+        let untrackedFile = directory.appendingPathComponent("notes.md")
+        try "# Notes\n".write(to: untrackedFile, atomically: true, encoding: .utf8)
+
+        let sessionID = UUID()
+        let persistence = WorkspacePersistence(fileURL: persistenceURL)
+        try persistence.save(
+            PersistedWorkspace(
+                selectedSessionID: sessionID,
+                sessions: [
+                    PersistedSession(id: sessionID, cwd: directory, columnWidth: 600)
+                ]
+            )
+        )
+
+        let store = WorkspaceStore(
+            persistence: persistence,
+            runtime: GhosttyRuntime(),
+            gitInspector: GitInspector(cacheLifetime: 60, debounceMilliseconds: 0)
+        )
+        let suiteName = "ColermAppTests.diffPager.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let shortcutSettings = KeyboardShortcutSettings(defaults: defaults)
+
+        let pager = ColumnPagerController(
+            store: store,
+            shortcutSettings: shortcutSettings,
+            onOpenSettings: {}
+        )
+        pager.loadViewIfNeeded()
+        pager.view.frame = NSRect(x: 0, y: 0, width: 1280, height: 720)
+        pager.view.layoutSubtreeIfNeeded()
+        pager.synchronize()
+        pager.view.layoutSubtreeIfNeeded()
+
+        XCTAssertEqual(pager.columnFrame(for: sessionID)?.width, 600)
+        XCTAssertEqual(pager.terminalFrame(for: sessionID)?.width, 600)
+        XCTAssertNil(pager.diffSidebarFrame(for: sessionID))
+
+        // Toggle diff sidebar ON
+        XCTAssertTrue(store.toggleDiffSidebar(for: sessionID))
+        pager.synchronize()
+        pager.view.layoutSubtreeIfNeeded()
+
+        let expectedExtendedWidth = 600
+            + TerminalSession.diffSidebarDividerWidth
+            + TerminalSession.defaultDiffSidebarWidth
+        XCTAssertEqual(pager.columnFrame(for: sessionID)?.width, expectedExtendedWidth)
+        XCTAssertEqual(pager.terminalFrame(for: sessionID)?.width, 600)
+        XCTAssertEqual(
+            pager.diffSidebarFrame(for: sessionID)?.origin.x,
+            600 + TerminalSession.diffSidebarDividerWidth
+        )
+        XCTAssertEqual(
+            pager.diffSidebarFrame(for: sessionID)?.width,
+            TerminalSession.defaultDiffSidebarWidth
+        )
+
+        try await waitForDiffFiles(on: store.sessions[0], paths: ["notes.md", "tracked.swift"])
+
+        // Toggle diff sidebar OFF
+        XCTAssertFalse(store.toggleDiffSidebar(for: sessionID))
+        pager.synchronize()
+        pager.view.layoutSubtreeIfNeeded()
+
+        XCTAssertEqual(pager.columnFrame(for: sessionID)?.width, 600)
+        XCTAssertEqual(pager.terminalFrame(for: sessionID)?.width, 600)
+        XCTAssertNil(pager.diffSidebarFrame(for: sessionID))
+    }
+
+    func testTerminalPasteboardPrefersEscapedFileURLOverBareFilenameAndIcon() throws {
+        let pasteboard = NSPasteboard(name: .init("ColermTests.fileURL.\(UUID().uuidString)"))
+        pasteboard.clearContents()
+        defer { pasteboard.releaseGlobally() }
+
+        let image = makeTestImage(width: 4, height: 4)
+        let tiffData = try XCTUnwrap(image.tiffRepresentation)
+        let fileURL = URL(fileURLWithPath: "/tmp/My Screenshots/shot (1).png")
+
+        let item = NSPasteboardItem()
+        item.setString(fileURL.absoluteString, forType: .fileURL)
+        item.setString("shot (1).png", forType: .string)
+        item.setData(tiffData, forType: .tiff)
+        XCTAssertTrue(pasteboard.writeObjects([item]))
+
+        let extracted = TerminalPasteboard.extractPasteText(from: pasteboard)
+        XCTAssertEqual(extracted, "/tmp/My\\ Screenshots/shot\\ \\(1\\).png")
+    }
+
+    func testTerminalPasteboardPreservesPlainTextEvenWithRichPreviewImage() throws {
+        let pasteboard = NSPasteboard(name: .init("ColermTests.richText.\(UUID().uuidString)"))
+        pasteboard.clearContents()
+        defer { pasteboard.releaseGlobally() }
+
+        let image = makeTestImage(width: 4, height: 4)
+        let tiffData = try XCTUnwrap(image.tiffRepresentation)
+
+        let item = NSPasteboardItem()
+        item.setString("echo hello\nworld", forType: .string)
+        item.setData(tiffData, forType: .tiff)
+        XCTAssertTrue(pasteboard.writeObjects([item]))
+
+        let extracted = TerminalPasteboard.extractPasteText(from: pasteboard)
+        XCTAssertEqual(extracted, "echo hello\nworld")
+    }
+
+    func testTerminalPasteboardMaterializesClipboardPNGAndTIFFImagesToReadablePNGPath() throws {
+        let imageDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ColermPasteTests-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: imageDirectory) }
+
+        let pasteboard = NSPasteboard(name: .init("ColermTests.image.\(UUID().uuidString)"))
+        defer { pasteboard.releaseGlobally() }
+
+        let image = makeTestImage(width: 12, height: 8)
+        let tiffData = try XCTUnwrap(image.tiffRepresentation)
+        let bitmap = try XCTUnwrap(NSBitmapImageRep(data: tiffData))
+        let pngData = try XCTUnwrap(bitmap.representation(using: .png, properties: [:]))
+
+        // 1. Raw PNG screenshot data on clipboard
+        pasteboard.clearContents()
+        XCTAssertTrue(pasteboard.setData(pngData, forType: .png))
+        let pngPath = try XCTUnwrap(
+            TerminalPasteboard.extractPasteText(from: pasteboard, imageDirectory: imageDirectory)
+        )
+        XCTAssertTrue(pngPath.hasSuffix(".png"))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: pngPath))
+        let savedPNGData = try Data(contentsOf: URL(fileURLWithPath: pngPath))
+        XCTAssertEqual(savedPNGData, pngData)
+
+        // 2. Raw TIFF image data on clipboard -> transcoded to valid PNG file
+        pasteboard.clearContents()
+        XCTAssertTrue(pasteboard.setData(tiffData, forType: .tiff))
+        let convertedPath = try XCTUnwrap(
+            TerminalPasteboard.extractPasteText(from: pasteboard, imageDirectory: imageDirectory)
+        )
+        XCTAssertTrue(convertedPath.hasSuffix(".png"))
+        let convertedData = try Data(contentsOf: URL(fileURLWithPath: convertedPath))
+        XCTAssertTrue(convertedData.starts(with: [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]))
+        XCTAssertNotNil(NSImage(contentsOfFile: convertedPath))
+    }
+
+    @MainActor
+    func testTerminalSurfaceViewMatchesPasteShortcutAcrossKeyboardLayouts() throws {
+        let cmdV = try XCTUnwrap(NSEvent.keyEvent(
+            with: .keyDown,
+            location: .zero,
+            modifierFlags: .command,
+            timestamp: 1,
+            windowNumber: 0,
+            context: nil,
+            characters: "v",
+            charactersIgnoringModifiers: "v",
+            isARepeat: false,
+            keyCode: UInt16(kVK_ANSI_V)
+        ))
+        XCTAssertTrue(TerminalSurfaceView.isPasteKeyEquivalent(cmdV))
+
+        let nonLatinCmdV = try XCTUnwrap(NSEvent.keyEvent(
+            with: .keyDown,
+            location: .zero,
+            modifierFlags: .command,
+            timestamp: 2,
+            windowNumber: 0,
+            context: nil,
+            characters: "м",
+            charactersIgnoringModifiers: "м",
+            isARepeat: false,
+            keyCode: UInt16(kVK_ANSI_V)
+        ))
+        XCTAssertTrue(TerminalSurfaceView.isPasteKeyEquivalent(nonLatinCmdV))
+
+        let ctrlV = try XCTUnwrap(NSEvent.keyEvent(
+            with: .keyDown,
+            location: .zero,
+            modifierFlags: .control,
+            timestamp: 3,
+            windowNumber: 0,
+            context: nil,
+            characters: "\u{16}",
+            charactersIgnoringModifiers: "v",
+            isARepeat: false,
+            keyCode: UInt16(kVK_ANSI_V)
+        ))
+        XCTAssertFalse(TerminalSurfaceView.isPasteKeyEquivalent(ctrlV))
+    }
+
+    func testPierreDiffsAssetsResolveBundledHTMLAndBundleJS() throws {
+        let indexURL = try XCTUnwrap(PierreDiffsAssets.indexHTMLURL)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: indexURL.path))
+
+        let bundleURL = indexURL.deletingLastPathComponent().appendingPathComponent("pierre-diffs.js")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: bundleURL.path))
+        let bundleData = try Data(contentsOf: bundleURL)
+        XCTAssertGreaterThan(bundleData.count, 100_000)
+    }
+
+    @MainActor
+    func testPierreDiffsWebViewForbidsRightClickReloadAndKeepsCopyOnly() throws {
+        let unselectedMenu = NSMenu()
+        let reloadOnly = NSMenuItem(title: "Reload", action: nil, keyEquivalent: "")
+        reloadOnly.identifier = NSUserInterfaceItemIdentifier("WKMenuItemIdentifierReload")
+        unselectedMenu.addItem(reloadOnly)
+
+        PierreDiffsWebView.sanitizeContextMenu(unselectedMenu)
+        XCTAssertTrue(unselectedMenu.items.isEmpty)
+
+        let selectedMenu = NSMenu()
+        let backItem = NSMenuItem(title: "Back", action: nil, keyEquivalent: "")
+        backItem.identifier = NSUserInterfaceItemIdentifier("WKMenuItemIdentifierGoBack")
+        let reloadItem = NSMenuItem(title: "Reload", action: nil, keyEquivalent: "")
+        reloadItem.identifier = NSUserInterfaceItemIdentifier("WKMenuItemIdentifierReload")
+        let copyItem = NSMenuItem(title: "Copy", action: nil, keyEquivalent: "")
+        copyItem.identifier = NSUserInterfaceItemIdentifier("WKMenuItemIdentifierCopy")
+        selectedMenu.addItem(backItem)
+        selectedMenu.addItem(reloadItem)
+        selectedMenu.addItem(.separator())
+        selectedMenu.addItem(copyItem)
+
+        PierreDiffsWebView.sanitizeContextMenu(selectedMenu)
+        XCTAssertEqual(selectedMenu.items.map(\.title), ["Copy"])
+
+        let webView = PierreDiffsWebView(frame: .zero)
+        XCTAssertNil(webView.reload())
+        XCTAssertNil(webView.reloadFromOrigin())
+
+        let cmdR = try XCTUnwrap(NSEvent.keyEvent(
+            with: .keyDown,
+            location: .zero,
+            modifierFlags: .command,
+            timestamp: 1,
+            windowNumber: 0,
+            context: nil,
+            characters: "r",
+            charactersIgnoringModifiers: "r",
+            isARepeat: false,
+            keyCode: UInt16(kVK_ANSI_R)
+        ))
+        XCTAssertTrue(webView.performKeyEquivalent(with: cmdR))
+    }
+
+    func testPierreDiffLayoutStylePersistsAndFallsBackToUnified() {
+        let suiteName = "ColermAppTests.diffStyle.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        XCTAssertEqual(PierreDiffLayoutStyle.persisted(in: defaults), .unified)
+        XCTAssertEqual(PierreDiffLayoutStyle.unified.toggled, .split)
+        XCTAssertEqual(PierreDiffLayoutStyle.split.toggled, .unified)
+
+        PierreDiffLayoutStyle.split.persist(in: defaults)
+        XCTAssertEqual(PierreDiffLayoutStyle.persisted(in: defaults), .split)
+
+        PierreDiffLayoutStyle.unified.persist(in: defaults)
+        XCTAssertEqual(PierreDiffLayoutStyle.persisted(in: defaults), .unified)
+
+        defaults.set("invalid", forKey: PierreDiffLayoutStyle.defaultsKey)
+        XCTAssertEqual(PierreDiffLayoutStyle.persisted(in: defaults), .unified)
+    }
+
+    func testGitDiffParserSubmodulePointerChangeDoesNotInflateLineCounts() {
+        let patch = """
+        diff --git a/Vendor/ghostty b/Vendor/ghostty
+        index 08342c9..08342c9-dirty 160000
+        --- a/Vendor/ghostty
+        +++ b/Vendor/ghostty
+        @@ -1 +1 @@
+        -Subproject commit 08342c92446ceda22b49f42ce39e8c4714054a6e
+        +Subproject commit 08342c92446ceda22b49f42ce39e8c4714054a6e-dirty
+        """
+
+        let files = GitDiffParser.parseUnifiedDiff(patch)
+        XCTAssertEqual(files.count, 1)
+        XCTAssertEqual(files.first?.path, "Vendor/ghostty")
+        XCTAssertEqual(files.first?.insertions, 0)
+        XCTAssertEqual(files.first?.deletions, 0)
+        XCTAssertEqual(files.first?.hunks.first?.lines.count, 2)
+    }
+
+    @MainActor
+    func testLightTerminalThemeKeepsANSIWhiteReadableAgainstBackground() throws {
+        XCTAssertEqual(GhosttySession.lightPalette.count, 16)
+        XCTAssertGreaterThanOrEqual(GhosttySession.lightMinimumContrast, 2.5)
+        XCTAssertEqual(GhosttySession.lightBackground, "#FAFAFA")
+        XCTAssertEqual(GhosttySession.lightPalette[7], "#5C5C5C")
+        XCTAssertEqual(GhosttySession.lightPalette[15], "#252525")
+        XCTAssertNotEqual(GhosttySession.lightPalette[7], GhosttySession.lightBackground)
+        XCTAssertNotEqual(GhosttySession.lightPalette[15], GhosttySession.lightBackground)
+
+        let repoRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let lightThemeFile = repoRoot.appendingPathComponent("Resources/themes/Colerm Light")
+        let themeText = try String(contentsOf: lightThemeFile, encoding: .utf8)
+        XCTAssertTrue(themeText.contains("minimum-contrast = 2.5"))
+        XCTAssertTrue(themeText.contains("palette = 7=#5C5C5C"))
+        XCTAssertTrue(themeText.contains("palette = 15=#252525"))
+    }
+
+    func testGitInspectorMetadataMatchesDiffSnapshotTotals() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ColumnConsistencyTests-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        try runGit(arguments: ["init", root.path])
+        try runGit(arguments: ["-C", root.path, "config", "user.email", "test@example.com"])
+        try runGit(arguments: ["-C", root.path, "config", "user.name", "Test User"])
+
+        try "one\ntwo\nthree\n".write(to: root.appendingPathComponent("tracked.txt"), atomically: true, encoding: .utf8)
+        try "alpha\nbeta\n".write(to: root.appendingPathComponent("rename-me.txt"), atomically: true, encoding: .utf8)
+        try runGit(arguments: ["-C", root.path, "add", "."])
+        try runGit(arguments: ["-C", root.path, "commit", "-m", "initial"])
+
+        // Staged + unstaged edit on tracked.txt
+        try "one\nTWO\nthree\nfour\n".write(to: root.appendingPathComponent("tracked.txt"), atomically: true, encoding: .utf8)
+        try runGit(arguments: ["-C", root.path, "add", "tracked.txt"])
+        try "one\nTWO\nthree\nfour\nfive\n".write(to: root.appendingPathComponent("tracked.txt"), atomically: true, encoding: .utf8)
+
+        // Rename
+        try runGit(arguments: ["-C", root.path, "mv", "rename-me.txt", "renamed.txt"])
+        try "alpha\nbeta\ngamma\n".write(to: root.appendingPathComponent("renamed.txt"), atomically: true, encoding: .utf8)
+
+        // Nested untracked directory with multiple files
+        let nestedDir = root.appendingPathComponent("nested/sub", isDirectory: true)
+        try FileManager.default.createDirectory(at: nestedDir, withIntermediateDirectories: true)
+        try "a1\na2\n".write(to: nestedDir.appendingPathComponent("a.txt"), atomically: true, encoding: .utf8)
+        try "b1\nb2\nb3\n".write(to: nestedDir.appendingPathComponent("b.txt"), atomically: true, encoding: .utf8)
+
+        let inspector = GitInspector(cacheLifetime: 0, debounceMilliseconds: 0)
+        let rawMetadata = await inspector.inspect(directory: root)
+        let metadata = try XCTUnwrap(rawMetadata)
+        let rawSnapshot = await inspector.inspectDiff(directory: root)
+        let snapshot = try XCTUnwrap(rawSnapshot)
+
+        XCTAssertEqual(metadata.changedFiles, snapshot.files.count)
+        XCTAssertEqual(metadata.insertions, snapshot.totalInsertions)
+        XCTAssertEqual(metadata.deletions, snapshot.totalDeletions)
+        XCTAssertEqual(metadata.changedFiles, 4)
+        XCTAssertEqual(metadata.insertions, 9)
+        XCTAssertEqual(metadata.deletions, 1)
+    }
+
+    func testGitInspectorLoadsLargeUntrackedAndImageFileDetailAndRejectsTraversal() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ColumnDetailTests-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        try runGit(arguments: ["init", root.path])
+        try runGit(arguments: ["-C", root.path, "config", "user.email", "test@example.com"])
+        try runGit(arguments: ["-C", root.path, "config", "user.name", "Test User"])
+
+        let largeText = String(repeating: "const value = 42;\n", count: 20_000)
+        let largeFileURL = root.appendingPathComponent("bundle.js")
+        try largeText.write(to: largeFileURL, atomically: true, encoding: .utf8)
+
+        let image = makeTestImage(width: 6, height: 6)
+        let tiffData = try XCTUnwrap(image.tiffRepresentation)
+        let bitmap = try XCTUnwrap(NSBitmapImageRep(data: tiffData))
+        let pngData = try XCTUnwrap(bitmap.representation(using: .png, properties: [:]))
+        let pngURL = root.appendingPathComponent("preview.png")
+        try pngData.write(to: pngURL)
+
+        let inspector = GitInspector(cacheLifetime: 0, debounceMilliseconds: 0)
+        let rawSnapshot = await inspector.inspectDiff(directory: root)
+        let snapshot = try XCTUnwrap(rawSnapshot)
+        let untrackedBundle = try XCTUnwrap(
+            snapshot.untrackedFiles.first { $0.path == "bundle.js" }
+        )
+        XCTAssertNil(untrackedBundle.contents)
+        XCTAssertTrue(untrackedBundle.canLoadDetail)
+        XCTAssertTrue(untrackedBundle.note?.hasPrefix("Large untracked file") == true)
+
+        let rawTextDetail = await inspector.loadFileDetail(
+            directory: root,
+            relativePath: "bundle.js",
+            kind: "U"
+        )
+        let loadedTextDetail = try XCTUnwrap(rawTextDetail)
+        XCTAssertEqual(loadedTextDetail.path, "bundle.js")
+        XCTAssertEqual(loadedTextDetail.textContents, largeText)
+        XCTAssertNil(loadedTextDetail.truncatedNote)
+        XCTAssertNil(loadedTextDetail.errorNote)
+
+        let rawImageDetail = await inspector.loadFileDetail(
+            directory: root,
+            relativePath: "preview.png",
+            kind: "U"
+        )
+        let loadedImageDetail = try XCTUnwrap(rawImageDetail)
+        XCTAssertNil(loadedImageDetail.textContents)
+        XCTAssertTrue(loadedImageDetail.imageDataURL?.hasPrefix("data:image/png;base64,") == true)
+
+        let traversalAttempt = await inspector.loadFileDetail(
+            directory: root,
+            relativePath: "../outside.txt",
+            kind: "U"
+        )
+        XCTAssertNil(traversalAttempt)
+    }
+
+    func testAgentCommandMatcherRecognizesAllSupportedAgentsAndRejectsFalsePositives() {
+        XCTAssertEqual(
+            AgentCommandMatcher.match(commandLine: "claude"),
+            AgentCommandMatch(agent: .claudeCode, startsWorkingImmediately: false)
+        )
+        XCTAssertEqual(
+            AgentCommandMatcher.match(commandLine: "claude -p \"fix the login bug\""),
+            AgentCommandMatch(agent: .claudeCode, startsWorkingImmediately: true)
+        )
+        XCTAssertEqual(
+            AgentCommandMatcher.match(
+                executablePath: "/opt/homebrew/bin/node",
+                arguments: ["node", "/opt/homebrew/lib/node_modules/@anthropic-ai/claude-code/cli.js", "--continue"]
+            ),
+            AgentCommandMatch(agent: .claudeCode, startsWorkingImmediately: false)
+        )
+
+        XCTAssertEqual(
+            AgentCommandMatcher.match(commandLine: "npx -y @openai/codex"),
+            AgentCommandMatch(agent: .codex, startsWorkingImmediately: false)
+        )
+        XCTAssertEqual(
+            AgentCommandMatcher.match(commandLine: "codex exec \"run swift test\""),
+            AgentCommandMatch(agent: .codex, startsWorkingImmediately: true)
+        )
+
+        XCTAssertEqual(
+            AgentCommandMatcher.match(commandLine: "pi"),
+            AgentCommandMatch(agent: .pi, startsWorkingImmediately: false)
+        )
+        XCTAssertEqual(
+            AgentCommandMatcher.match(
+                executablePath: "/Users/dev/.bun/bin/bun",
+                arguments: ["bun", "/Users/dev/.bun/install/global/node_modules/@mariozechner/pi-coding-agent/dist/cli.js", "-p", "lint"]
+            ),
+            AgentCommandMatch(agent: .pi, startsWorkingImmediately: true)
+        )
+
+        XCTAssertEqual(
+            AgentCommandMatcher.match(commandLine: "opencode run \"update docs\""),
+            AgentCommandMatch(agent: .opencode, startsWorkingImmediately: true)
+        )
+        XCTAssertEqual(
+            AgentCommandMatcher.match(
+                executablePath: "/Users/dev/.opencode/bin/opencode-darwin-arm64",
+                arguments: ["opencode"]
+            ),
+            AgentCommandMatch(agent: .opencode, startsWorkingImmediately: false)
+        )
+
+        XCTAssertEqual(
+            AgentCommandMatcher.match(commandLine: "grok"),
+            AgentCommandMatch(agent: .grok, startsWorkingImmediately: false)
+        )
+        XCTAssertEqual(
+            AgentCommandMatcher.match(
+                executablePath: "/opt/homebrew/bin/node",
+                arguments: ["node", "/opt/homebrew/lib/node_modules/@xai-official/grok/dist/index.js"]
+            ),
+            AgentCommandMatch(agent: .grok, startsWorkingImmediately: false)
+        )
+
+        XCTAssertEqual(
+            AgentCommandMatcher.match(commandLine: "droid exec \"refactor parser\""),
+            AgentCommandMatch(agent: .factoryDroid, startsWorkingImmediately: true)
+        )
+        XCTAssertEqual(
+            AgentCommandMatcher.match(commandLine: "/Users/dev/.factory/bin/droid"),
+            AgentCommandMatch(agent: .factoryDroid, startsWorkingImmediately: false)
+        )
+
+        XCTAssertEqual(
+            AgentCommandMatcher.match(commandLine: "cd /tmp/project && FOO=1 caffeinate -i agy"),
+            AgentCommandMatch(agent: .agy, startsWorkingImmediately: false)
+        )
+        XCTAssertEqual(
+            AgentCommandMatcher.match(
+                executablePath: "/Users/dev/.gemini/antigravity-cli/bin/agy",
+                arguments: ["agy", "-p", "check build"]
+            ),
+            AgentCommandMatch(agent: .agy, startsWorkingImmediately: true)
+        )
+
+        // Reject help/version probes and non-agent commands mentioning agent names in arguments
+        XCTAssertNil(AgentCommandMatcher.match(commandLine: "claude --version"))
+        XCTAssertNil(AgentCommandMatcher.match(commandLine: "agy --help"))
+        XCTAssertNil(AgentCommandMatcher.match(commandLine: "vim CLAUDE.md"))
+        XCTAssertNil(AgentCommandMatcher.match(commandLine: "rg codex Sources/"))
+        XCTAssertNil(AgentCommandMatcher.match(commandLine: "git checkout -b feat/opencode-pi-grok-droid"))
+        XCTAssertNil(AgentCommandMatcher.match(commandLine: "node scripts/server.js --agent claude"))
+    }
+
+    func testAgentTrackerClearsRunningOnSelectedTabDespiteCursorBlinkAndIgnoresBootMCPNoise() {
+        // 1. Reproduce OpenCode boot in background tab (`/update` banner + `1 MCP failed /mcps`):
+        //    must stay `.idle` (never falsely enter Running or Done without a prompt).
+        var opencodeTracker = AgentActivityTracker()
+        let opencodeObs = AgentProcessObservation(
+            agent: .opencode,
+            rootPID: 700,
+            startsWorkingImmediately: false,
+            totalCPUNanoseconds: 120_000_000,
+            nonAgentChildren: []
+        )
+        let opencodeBoot1 = TerminalViewportSnapshot.from(lines: [
+            "opencode",
+            "Ask anything... \"Fix a TODO in the codebase\"",
+            "Build · Grok 4.6 OpenRouter"
+        ])
+        _ = opencodeTracker.poll(
+            observation: opencodeObs,
+            viewport: opencodeBoot1,
+            isTabSelected: false,
+            now: 100.0
+        )
+        XCTAssertEqual(opencodeTracker.status, AgentSessionStatus(agent: .opencode, phase: .idle))
+
+        // 3.5s after launch, async update check + MCP child failure redraws screen and emits boot progress
+        var opencodeWithMCP = opencodeObs
+        opencodeWithMCP.nonAgentChildren = [
+            AgentChildProcessObservation(pid: 701, totalCPUNanoseconds: 8_000_000, isHelperDaemon: true)
+        ]
+        _ = opencodeTracker.handleProgressReport(.active, isTabSelected: false, now: 103.0)
+        let opencodeBoot2 = TerminalViewportSnapshot.from(lines: [
+            "opencode",
+            "/update to install v2.3.2",
+            "Ask anything... \"Fix a TODO in the codebase\"",
+            "Build · Grok 4.6 OpenRouter",
+            "~/Code/column:master    shift+tab agents",
+            "⊙ 1 MCP failed /mcps"
+        ])
+        _ = opencodeTracker.poll(
+            observation: opencodeWithMCP,
+            viewport: opencodeBoot2,
+            isTabSelected: false,
+            now: 103.5
+        )
+        _ = opencodeTracker.poll(
+            observation: opencodeWithMCP,
+            viewport: opencodeBoot2,
+            isTabSelected: false,
+            now: 106.5
+        )
+        XCTAssertEqual(opencodeTracker.status, AgentSessionStatus(agent: .opencode, phase: .idle))
+        XCTAssertEqual(opencodeTracker.status?.isVisibleInTab, false)
+
+        // 2. Reproduce Antigravity (`agy`) in selected Tab 1:
+        //    User submits `hi`, AGY replies `Hi! How can I help you with Colerm today?`,
+        //    and sits at idle prompt blinking cursor — Running MUST clear to `.idle`.
+        var agyTracker = AgentActivityTracker()
+        let agyObs = AgentProcessObservation(
+            agent: .agy,
+            rootPID: 800,
+            startsWorkingImmediately: false,
+            totalCPUNanoseconds: 90_000_000,
+            nonAgentChildren: [
+                AgentChildProcessObservation(pid: 801, totalCPUNanoseconds: 20_000_000, isHelperDaemon: true)
+            ]
+        )
+        let agyWelcome = TerminalViewportSnapshot.from(lines: [
+            "Antigravity CLI 1.5.11",
+            "> Auto mode: edits & safe commands auto-approved (shift+tab to cycle)",
+            "? for shortcuts   auto · Gemini 4 Carbon · medium"
+        ])
+        _ = agyTracker.poll(observation: agyObs, viewport: agyWelcome, isTabSelected: true, now: 200.0)
+        XCTAssertEqual(agyTracker.status, AgentSessionStatus(agent: .agy, phase: .idle))
+
+        // User types `hi` and presses Return on selected tab
+        _ = agyTracker.handleUserInput(.typing, now: 208.0)
+        _ = agyTracker.handleUserInput(.submit, now: 208.3)
+        XCTAssertEqual(agyTracker.status, AgentSessionStatus(agent: .agy, phase: .running))
+
+        let agyThinking = TerminalViewportSnapshot.from(lines: [
+            "Antigravity CLI 1.5.11",
+            "> hi",
+            "⠋ Thinking... (esc to cancel)"
+        ])
+        _ = agyTracker.poll(observation: agyObs, viewport: agyThinking, isTabSelected: true, now: 208.5)
+        XCTAssertEqual(agyTracker.status?.phase, .running)
+
+        let agyAnsweredA = TerminalViewportSnapshot.from(lines: [
+            "Antigravity CLI 1.5.11",
+            "> hi",
+            "Hi! How can I help you with Colerm today?",
+            "> Auto mode: edits & safe commands auto-approved (shift+tab to cycle)",
+            "? for shortcuts   auto · Gemini 4 Carbon · medium"
+        ])
+        // Even if an ASCII block cursor toggles between 2 frames every 0.5s, ring buffer ignores A<->B blink
+        let agyAnsweredBlinkB = TerminalViewportSnapshot.from(lines: [
+            "Antigravity CLI 1.5.11",
+            "> hi",
+            "Hi! How can I help you with Colerm today?",
+            "> █uto mode: edits & safe commands auto-approved (shift+tab to cycle)",
+            "? for shortcuts   auto · Gemini 4 Carbon · medium"
+        ])
+        _ = agyTracker.poll(observation: agyObs, viewport: agyAnsweredA, isTabSelected: true, now: 209.0)
+        _ = agyTracker.poll(observation: agyObs, viewport: agyAnsweredBlinkB, isTabSelected: true, now: 209.5)
+        _ = agyTracker.poll(observation: agyObs, viewport: agyAnsweredA, isTabSelected: true, now: 210.0)
+        _ = agyTracker.poll(observation: agyObs, viewport: agyAnsweredBlinkB, isTabSelected: true, now: 210.5)
+        _ = agyTracker.poll(observation: agyObs, viewport: agyAnsweredA, isTabSelected: true, now: 211.0)
+        _ = agyTracker.poll(observation: agyObs, viewport: agyAnsweredBlinkB, isTabSelected: true, now: 211.6)
+
+        // Selected tab clears Running back to idle automatically!
+        XCTAssertEqual(agyTracker.status, AgentSessionStatus(agent: .agy, phase: .idle))
+        XCTAssertEqual(agyTracker.status?.isVisibleInTab, false)
+    }
+
+    func testAgentTrackerLifecycleHandlesSubmitStreamingSettleAndStaleTitleSpinners() {
+        var tracker = AgentActivityTracker()
+        let baseObservation = AgentProcessObservation(
+            agent: .codex,
+            rootPID: 420,
+            startsWorkingImmediately: false,
+            totalCPUNanoseconds: 100_000_000,
+            nonAgentChildren: [
+                AgentChildProcessObservation(pid: 421, totalCPUNanoseconds: 5_000_000, isHelperDaemon: true)
+            ]
+        )
+        let idleScreen = TerminalViewportSnapshot.from(lines: ["› Ask Codex to do anything"])
+
+        _ = tracker.poll(observation: baseObservation, viewport: idleScreen, isTabSelected: false, now: 100.5)
+        XCTAssertEqual(tracker.status, AgentSessionStatus(agent: .codex, phase: .idle))
+        XCTAssertEqual(tracker.status?.isVisibleInTab, false)
+
+        // Empty Enter with prompt redraw reverts back to idle without false "Done"
+        _ = tracker.handleUserInput(.submit, now: 107.0)
+        XCTAssertEqual(tracker.status?.phase, .running)
+        let emptyEcho = TerminalViewportSnapshot.from(lines: ["›", "› Ask Codex to do anything"])
+        _ = tracker.poll(observation: baseObservation, viewport: emptyEcho, isTabSelected: false, now: 107.5)
+        _ = tracker.poll(observation: baseObservation, viewport: emptyEcho, isTabSelected: false, now: 108.6)
+        XCTAssertEqual(tracker.status?.phase, .idle)
+
+        // Typing characters while composing prompt stays idle
+        _ = tracker.handleUserInput(.typing, now: 109.0)
+        let typingScreen = TerminalViewportSnapshot.from(lines: ["› refactor store"])
+        _ = tracker.poll(observation: baseObservation, viewport: typingScreen, isTabSelected: false, now: 109.4)
+        XCTAssertEqual(tracker.status?.phase, .idle)
+
+        // Real prompt submission + autonomous TUI streaming + frozen stale spinner title -> Done
+        _ = tracker.handleUserInput(.submit, now: 110.0)
+        XCTAssertEqual(tracker.status?.phase, .running)
+
+        _ = tracker.handleTitleChange("⠋ Refactoring store", isTabSelected: false, now: 110.3)
+        _ = tracker.handleTitleChange("⠙ Refactoring store", isTabSelected: false, now: 110.6)
+        _ = tracker.handleTitleChange("⠹ Refactoring store", isTabSelected: false, now: 110.9)
+
+        let workFrame1 = TerminalViewportSnapshot.from(lines: [
+            "› refactor store",
+            "⠋ Working (1s • esc to interrupt)"
+        ])
+        let workFrame2 = TerminalViewportSnapshot.from(lines: [
+            "› refactor store",
+            "Updated WorkspaceStore.swift.",
+            "› Ask Codex to do anything"
+        ])
+        _ = tracker.poll(observation: baseObservation, viewport: workFrame1, isTabSelected: false, now: 111.0)
+        XCTAssertEqual(tracker.status?.phase, .running)
+        _ = tracker.poll(observation: baseObservation, viewport: workFrame2, isTabSelected: false, now: 112.0)
+        XCTAssertEqual(tracker.status?.phase, .running)
+
+        // Output stops at 112.0 while Codex leaves frozen "⠹ Refactoring store" in the title;
+        // after passiveSettleInterval (2.0s), background tab transitions to Done.
+        _ = tracker.poll(observation: baseObservation, viewport: workFrame2, isTabSelected: false, now: 113.0)
+        XCTAssertEqual(tracker.status?.phase, .running)
+        _ = tracker.poll(observation: baseObservation, viewport: workFrame2, isTabSelected: false, now: 114.1)
+        XCTAssertEqual(tracker.status, AgentSessionStatus(agent: .codex, phase: .done))
+        XCTAssertEqual(tracker.status?.isVisibleInTab, true)
+
+        // Switching to the tab clears Done immediately back to idle while TUI remains alive
+        XCTAssertTrue(tracker.clearCompletedStatus())
+        XCTAssertEqual(tracker.status, AgentSessionStatus(agent: .codex, phase: .idle))
+        XCTAssertEqual(tracker.status?.isVisibleInTab, false)
+    }
+
+    @MainActor
+    func testWorkspaceStoreClearsCompletedAgentStatusImmediatelyOnTabSelect() throws {
+        let persistenceURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ColumnAgentSelect-\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: persistenceURL) }
+
+        let firstID = UUID()
+        let secondID = UUID()
+        let persistence = WorkspacePersistence(fileURL: persistenceURL)
+        try persistence.save(
+            PersistedWorkspace(
+                selectedSessionID: firstID,
+                sessions: [
+                    PersistedSession(id: firstID, cwd: URL(fileURLWithPath: "/tmp/first"), columnWidth: 600),
+                    PersistedSession(id: secondID, cwd: URL(fileURLWithPath: "/tmp/second"), columnWidth: 600)
+                ]
+            )
+        )
+
+        let inspector = MockAgentProcessInspector()
+        let store = WorkspaceStore(
+            persistence: persistence,
+            runtime: GhosttyRuntime(),
+            gitInspector: GitInspector(),
+            agentInspector: inspector
+        )
+        XCTAssertEqual(store.selectedSessionID, firstID)
+
+        // Background tab 2 runs interactive Claude Code -> post-boot progress -> finishes -> Done -> clears on select
+        store.sessions[1].commandStarted(commandLine: "claude", now: 10)
+        XCTAssertEqual(store.sessions[1].agentStatus, AgentSessionStatus(agent: .claudeCode, phase: .idle))
+
+        store.sessions[1].handleProgressReport(.active, now: 18)
+        XCTAssertEqual(store.sessions[1].agentStatus, AgentSessionStatus(agent: .claudeCode, phase: .running))
+
+        store.sessions[1].handleProgressReport(.remove, now: 20)
+        store.handle(.agentStatusHint(secondID, "done"))
+        XCTAssertEqual(store.sessions[1].agentStatus, AgentSessionStatus(agent: .claudeCode, phase: .done))
+
+        // Selecting tab 2 clears Done immediately back to idle (TUI still open)
+        store.select(secondID)
+        XCTAssertEqual(store.sessions[1].agentStatus, AgentSessionStatus(agent: .claudeCode, phase: .idle))
+        XCTAssertEqual(store.sessions[1].agentStatus?.isVisibleInTab, false)
+
+        // Switch back to tab 1; run one-shot `droid exec` in tab 2 which exits with 0 -> Done -> clears to nil on select
+        store.select(firstID)
+        store.sessions[1].commandStarted(commandLine: "droid exec \"fix tests\"", now: 30)
+        XCTAssertEqual(store.sessions[1].agentStatus, AgentSessionStatus(agent: .factoryDroid, phase: .running))
+
+        store.handle(.commandFinished(secondID, 0))
+        XCTAssertEqual(store.sessions[1].agentStatus, AgentSessionStatus(agent: .factoryDroid, phase: .done))
+
+        store.select(secondID)
+        XCTAssertNil(store.sessions[1].agentStatus)
+    }
+
+    func testAgentViewportAnalyzerAndTrackerDetectAGYQuestionsPermissionsAndIgnoreIdleComposer() {
+        var tracker = AgentActivityTracker()
+        let agyObservation = AgentProcessObservation(
+            agent: .agy,
+            rootPID: 910,
+            startsWorkingImmediately: false,
+            totalCPUNanoseconds: 80_000_000,
+            nonAgentChildren: []
+        )
+
+        let idleWelcome = TerminalViewportSnapshot.from(lines: [
+            "Antigravity CLI",
+            "> Auto mode: edits & safe commands auto-approved (shift+tab to cycle)",
+            "? for shortcuts   auto · Gemini 4 Argon · medium"
+        ])
+        _ = tracker.poll(observation: agyObservation, viewport: idleWelcome, isTabSelected: true, now: 100.0)
+        XCTAssertEqual(tracker.status, AgentSessionStatus(agent: .agy, phase: .idle))
+
+        // Submit prompt on selected tab -> Running
+        _ = tracker.handleUserInput(.typing, now: 107.0)
+        _ = tracker.handleUserInput(.submit, now: 107.2)
+        XCTAssertEqual(tracker.status?.phase, .running)
+
+        let thinkingScreen = TerminalViewportSnapshot.from(lines: [
+            "> remember the selected diff view type and improve design to avoid redundancy of this",
+            "⠋ Thinking... (esc to cancel)"
+        ])
+        _ = tracker.poll(observation: agyObservation, viewport: thinkingScreen, isTabSelected: true, now: 107.5)
+        XCTAssertEqual(tracker.status?.phase, .running)
+
+        // AGY renders multi-line wrapped Question 1/1 menu ending with `esc to cancel`:
+        // must NOT stay trapped in Running due to `esc to cancel`, and must enter `.needsInput(.question)`.
+        let questionChoice1 = TerminalViewportSnapshot.from(lines: [
+            "? How would you like to resolve the redundant diff summary between the terminal title bar and the Diffs sidebar header?",
+            "Question",
+            "────────────────────────────────────────────────────────",
+            "Question 1/1: How would you like to resolve the redundant diff summary",
+            "between the terminal title bar and the Diffs sidebar header?",
+            "> 1. (Recommended) Remove the duplicate counts from the Diffs header",
+            "(keep the stats pill in the terminal title bar)",
+            "  2. Collapse the terminal title bar button to icon-only when open, and",
+            "keep counts in the Diffs header (frees space for branch/path)",
+            "  3. Replace \"Diffs 30 +...\" in the sidebar header with a Unified /",
+            "Split segmented control",
+            "  4. Write-in...",
+            "↑/↓ Navigate · enter Select · esc Skip · ctrl+r Review",
+            "esc to cancel                 auto · Gemini 4 Argon · medium"
+        ])
+        XCTAssertEqual(AgentViewportAnalyzer.detectedBlockedKind(in: questionChoice1.tailLines), .question)
+        XCTAssertFalse(AgentViewportAnalyzer.hasExplicitBusyIndicator(in: questionChoice1.tailLines))
+
+        _ = tracker.poll(observation: agyObservation, viewport: questionChoice1, isTabSelected: true, now: 108.0)
+        _ = tracker.poll(observation: agyObservation, viewport: questionChoice1, isTabSelected: true, now: 108.6)
+        XCTAssertEqual(tracker.status, AgentSessionStatus(agent: .agy, phase: .needsInput(.question)))
+        XCTAssertEqual(tracker.status?.isVisibleInTab, true)
+        XCTAssertEqual(tracker.status?.badgeLabel, "Input")
+        XCTAssertEqual(tracker.status?.helpText, "Antigravity · Waiting for Answer")
+
+        // Selecting the tab does NOT clear `.needsInput` (unlike `.done`)
+        XCTAssertFalse(tracker.clearCompletedStatus())
+        XCTAssertEqual(tracker.status?.phase, .needsInput(.question))
+
+        // Navigating options with ↓ arrow redraws highlight but stays `.needsInput(.question)`
+        _ = tracker.handleUserInput(.typing, now: 109.0)
+        let questionChoice2 = TerminalViewportSnapshot.from(lines: [
+            "Question 1/1: How would you like to resolve the redundant diff summary",
+            "  1. (Recommended) Remove the duplicate counts from the Diffs header",
+            "> 2. Collapse the terminal title bar button to icon-only when open, and",
+            "  3. Replace \"Diffs 30 +...\" in the sidebar header",
+            "  4. Write-in...",
+            "↑/↓ Navigate · enter Select · esc Skip · ctrl+r Review",
+            "esc to cancel                 auto · Gemini 4 Argon · medium"
+        ])
+        _ = tracker.poll(observation: agyObservation, viewport: questionChoice2, isTabSelected: true, now: 109.5)
+        XCTAssertEqual(tracker.status?.phase, .needsInput(.question))
+
+        // Pressing Return (even long after typing, e.g. accepting default choice) immediately resumes `.running`
+        _ = tracker.handleUserInput(.submit, now: 145.0)
+        XCTAssertEqual(tracker.status?.phase, .running)
+        let resumedWork = TerminalViewportSnapshot.from(lines: [
+            "● Editing Sources/ColermApp/UI/TerminalDiffSidebarView.swift (esc to cancel)"
+        ])
+        _ = tracker.poll(observation: agyObservation, viewport: resumedWork, isTabSelected: true, now: 145.5)
+        XCTAssertEqual(tracker.status?.phase, .running)
+
+        // Permission prompt detection & Esc dismissal without bounce-back
+        let permissionPrompt = TerminalViewportSnapshot.from(lines: [
+            "Do you want to proceed?",
+            "❯ 1. Yes",
+            "  2. Yes, allow for this session",
+            "  3. No, and tell the agent what to do differently (esc)",
+            "Esc to cancel"
+        ])
+        XCTAssertEqual(AgentViewportAnalyzer.detectedBlockedKind(in: permissionPrompt.tailLines), .permission)
+        _ = tracker.poll(observation: agyObservation, viewport: permissionPrompt, isTabSelected: false, now: 146.0)
+        _ = tracker.poll(observation: agyObservation, viewport: permissionPrompt, isTabSelected: false, now: 146.6)
+        XCTAssertEqual(tracker.status?.phase, .needsInput(.permission))
+        XCTAssertEqual(tracker.status?.badgeLabel, "Approve")
+
+        // Pressing Esc clears `.needsInput` immediately and won't bounce back on the same unchanged screen
+        _ = tracker.handleUserInput(.interrupt, now: 147.0)
+        XCTAssertEqual(tracker.status?.phase, .idle)
+        _ = tracker.poll(observation: agyObservation, viewport: permissionPrompt, isTabSelected: true, now: 147.5)
+        XCTAssertEqual(tracker.status?.phase, .idle)
+
+        // Conversation text mentioning permission/question phrases above an idle composer must NOT trigger false positives
+        let finishedTurnDiscussingPrompts = TerminalViewportSnapshot.from(lines: [
+            "Updated tests for \"Do you want to proceed?\" and \"Question 1/1:\" prompts.",
+            "  1. Yes, allow once",
+            "  2. Always allow",
+            "> Auto mode: edits & safe commands auto-approved (shift+tab to cycle)",
+            "? for shortcuts   auto · Gemini 4 Argon · medium"
+        ])
+        XCTAssertNil(AgentViewportAnalyzer.detectedBlockedKind(in: finishedTurnDiscussingPrompts.tailLines))
+        XCTAssertEqual(
+            AgentViewportAnalyzer.detectedBlockedKind(in: ["Apply migration now? [y/n]"]),
+            .permission
+        )
+        XCTAssertEqual(
+            AgentViewportAnalyzer.detectedBlockedKind(in: ["Open this URL in your browser to authenticate"]),
+            .auth
+        )
+    }
+
+    @MainActor
+    func testRexStyleProgramStatusProtocolHintsDesktopNotificationsAndPaletteSearch() throws {
+        let persistenceURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ColumnAgentBlockedHints-\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: persistenceURL) }
+
+        let firstID = UUID()
+        let secondID = UUID()
+        let persistence = WorkspacePersistence(fileURL: persistenceURL)
+        try persistence.save(
+            PersistedWorkspace(
+                selectedSessionID: firstID,
+                sessions: [
+                    PersistedSession(id: firstID, cwd: URL(fileURLWithPath: "/tmp/app"), columnWidth: 600),
+                    PersistedSession(id: secondID, cwd: URL(fileURLWithPath: "/tmp/api"), columnWidth: 600)
+                ]
+            )
+        )
+
+        let store = WorkspaceStore(
+            persistence: persistence,
+            runtime: GhosttyRuntime(),
+            gitInspector: GitInspector(),
+            agentInspector: MockAgentProcessInspector()
+        )
+
+        // 1. Rex OSC 7501 key-value format over `agentStatusHint`
+        store.handle(.agentStatusHint(secondID, "state=working:app=claude-code"))
+        XCTAssertEqual(store.sessions[1].agentStatus, AgentSessionStatus(agent: .claudeCode, phase: .running))
+
+        store.handle(.agentStatusHint(secondID, "state=blocked:kind=permission:app=claude-code:msg=QmFzaA=="))
+        XCTAssertEqual(
+            store.sessions[1].agentStatus,
+            AgentSessionStatus(agent: .claudeCode, phase: .needsInput(.permission))
+        )
+        XCTAssertEqual(store.sessions[1].agentStatus?.badgeLabel, "Approve")
+        XCTAssertEqual(store.sessions[1].agentStatus?.helpText, "Claude Code · Waiting for Approval")
+
+        // Selecting a blocked tab preserves the blocked badge until resolved
+        store.select(secondID)
+        XCTAssertEqual(
+            store.sessions[1].agentStatus,
+            AgentSessionStatus(agent: .claudeCode, phase: .needsInput(.permission))
+        )
+
+        store.select(firstID)
+        store.handle(.agentStatusHint(secondID, "state=done:app=claude-code"))
+        XCTAssertEqual(store.sessions[1].agentStatus, AgentSessionStatus(agent: .claudeCode, phase: .done))
+
+        // 2. Native OSC 9/777 desktop notification from a live agent session surfaces `.needsInput`
+        store.sessions[0].commandStarted(commandLine: "codex", now: 50)
+        store.sessions[0].handleAgentDesktopNotification(
+            title: "Codex",
+            body: "Codex is waiting for your input",
+            now: 55
+        )
+        XCTAssertEqual(
+            store.sessions[0].agentStatus,
+            AgentSessionStatus(agent: .codex, phase: .needsInput(.input))
+        )
+
+        // 3. Command palette search matches agent status badges ("approve", "input")
+        let paletteItems = [
+            TerminalPaletteItem(
+                id: firstID,
+                index: 1,
+                title: "app",
+                path: "/tmp/app",
+                agentStatus: store.sessions[0].agentStatus
+            ),
+            TerminalPaletteItem(
+                id: secondID,
+                index: 2,
+                title: "api",
+                path: "/tmp/api",
+                agentStatus: AgentSessionStatus(agent: .claudeCode, phase: .needsInput(.permission))
+            )
+        ]
+        XCTAssertEqual(TerminalPaletteSearch.filter(paletteItems, query: "approve").map(\.id), [secondID])
+        XCTAssertEqual(TerminalPaletteSearch.filter(paletteItems, query: "codex input").map(\.id), [firstID])
+    }
+
+    @MainActor
+    func testTerminalSurfaceViewClassifiesReturnInterruptAndModifiedReturnKeys() throws {
+        let plainReturn = try XCTUnwrap(NSEvent.keyEvent(
+            with: .keyDown,
+            location: .zero,
+            modifierFlags: [],
+            timestamp: 0,
+            windowNumber: 0,
+            context: nil,
+            characters: "\r",
+            charactersIgnoringModifiers: "\r",
+            isARepeat: false,
+            keyCode: UInt16(kVK_Return)
+        ))
+        let shiftReturn = try XCTUnwrap(NSEvent.keyEvent(
+            with: .keyDown,
+            location: .zero,
+            modifierFlags: [.shift],
+            timestamp: 0,
+            windowNumber: 0,
+            context: nil,
+            characters: "\r",
+            charactersIgnoringModifiers: "\r",
+            isARepeat: false,
+            keyCode: UInt16(kVK_Return)
+        ))
+        let escapeKey = try XCTUnwrap(NSEvent.keyEvent(
+            with: .keyDown,
+            location: .zero,
+            modifierFlags: [],
+            timestamp: 0,
+            windowNumber: 0,
+            context: nil,
+            characters: "\u{1b}",
+            charactersIgnoringModifiers: "\u{1b}",
+            isARepeat: false,
+            keyCode: UInt16(kVK_Escape)
+        ))
+        let letterKey = try XCTUnwrap(NSEvent.keyEvent(
+            with: .keyDown,
+            location: .zero,
+            modifierFlags: [],
+            timestamp: 0,
+            windowNumber: 0,
+            context: nil,
+            characters: "a",
+            charactersIgnoringModifiers: "a",
+            isARepeat: false,
+            keyCode: UInt16(kVK_ANSI_A)
+        ))
+
+        XCTAssertEqual(TerminalSurfaceView.classifyKeyInput(plainReturn), .submit)
+        XCTAssertEqual(TerminalSurfaceView.classifyKeyInput(shiftReturn), .typing)
+        XCTAssertEqual(TerminalSurfaceView.classifyKeyInput(escapeKey), .interrupt)
+        XCTAssertEqual(TerminalSurfaceView.classifyKeyInput(letterKey), .typing)
+
+        let systemInspector = SystemAgentProcessInspector()
+        XCTAssertNil(systemInspector.inspect(foregroundPID: getpid()))
+    }
+
+    @MainActor
+    func testGhosttySessionReadsLiveViewportTextFromAttachedSurface() async throws {
+        let runtime = GhosttyRuntime()
+        runtime.start()
+
+        let session = runtime.createSession(
+            options: SessionLaunchOptions(
+                command: "/bin/echo COLERM_VIEWPORT_OK && /bin/sleep 2"
+            )
+        )
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 640, height: 360),
+            styleMask: [.titled, .resizable],
+            backing: .buffered,
+            defer: false
+        )
+        window.isReleasedWhenClosed = false
+        defer {
+            runtime.destroySession(session)
+            runtime.stop()
+            window.orderOut(nil)
+        }
+
+        session.view.frame = NSRect(x: 0, y: 0, width: 640, height: 360)
+        window.contentView = session.view
+        window.layoutIfNeeded()
+        session.view.layoutSubtreeIfNeeded()
+
+        var foundMarker = false
+        var lastSnapshot: TerminalViewportSnapshot?
+        for _ in 0 ..< 40 {
+            if let snapshot = session.pollViewportSnapshot(readText: true) {
+                lastSnapshot = snapshot
+                if snapshot.tailLines.contains(where: { $0.contains("COLERM_VIEWPORT_OK") }) {
+                    foundMarker = true
+                    break
+                }
+            }
+            try await Task.sleep(nanoseconds: 50_000_000)
+        }
+
+        XCTAssertTrue(
+            foundMarker,
+            "Expected live GhosttySession viewport snapshot to read rendered output, got \(String(describing: lastSnapshot)) isRunning=\(session.isRunning) pid=\(String(describing: session.foregroundPID))"
+        )
+    }
 }
 
 @MainActor
@@ -710,6 +1957,58 @@ private func waitForGitStatus(
 }
 
 @MainActor
+private func waitForGitBranch(
+    on session: TerminalSession,
+    branch: String
+) async throws {
+    for _ in 0..<30 {
+        if session.metadata.git?.branch == branch {
+            return
+        }
+        try await Task.sleep(nanoseconds: 50_000_000)
+    }
+    XCTFail("Timed out waiting for Git branch \(branch), got \(session.metadata.git?.branch ?? "nil")")
+}
+
+@MainActor
+private func waitForDiffFiles(
+    on session: TerminalSession,
+    paths: [String]
+) async throws {
+    for _ in 0..<30 {
+        if session.diffSnapshot?.files.map(\.path) == paths {
+            return
+        }
+        try await Task.sleep(nanoseconds: 50_000_000)
+    }
+    XCTFail("Timed out waiting for diff files \(paths), got \(session.diffSnapshot?.files.map(\.path) ?? [])")
+}
+
+private func makeTestImage(width: Int, height: Int) -> NSImage {
+    let rep = NSBitmapImageRep(
+        bitmapDataPlanes: nil,
+        pixelsWide: width,
+        pixelsHigh: height,
+        bitsPerSample: 8,
+        samplesPerPixel: 4,
+        hasAlpha: true,
+        isPlanar: false,
+        colorSpaceName: .deviceRGB,
+        bytesPerRow: 0,
+        bitsPerPixel: 0
+    )!
+    NSGraphicsContext.saveGraphicsState()
+    NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
+    NSColor.systemBlue.setFill()
+    NSRect(x: 0, y: 0, width: width, height: height).fill()
+    NSGraphicsContext.restoreGraphicsState()
+
+    let image = NSImage(size: NSSize(width: width, height: height))
+    image.addRepresentation(rep)
+    return image
+}
+
+@MainActor
 private final class ActivityTestEngine: TerminalEngineSession {
     let view = NSView(frame: .zero)
     var reportedForegroundPID: pid_t?
@@ -720,4 +2019,13 @@ private final class ActivityTestEngine: TerminalEngineSession {
     func blur() {}
     func setOccluded(_: Bool) {}
     func close() { isRunning = false }
+}
+
+@MainActor
+private final class MockAgentProcessInspector: AgentProcessInspecting {
+    var observation: AgentProcessObservation?
+
+    func inspect(foregroundPID _: pid_t) -> AgentProcessObservation? {
+        observation
+    }
 }

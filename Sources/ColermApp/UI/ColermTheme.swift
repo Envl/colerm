@@ -50,6 +50,18 @@ enum ColermTheme {
         light: NSColor(srgbRed: 0.08, green: 0.48, blue: 0.46, alpha: 1),
         dark: NSColor(srgbRed: 0.43, green: 0.82, blue: 0.79, alpha: 1)
     )
+    static let agentRunningNS = dynamic(
+        light: NSColor(srgbRed: 0.78, green: 0.43, blue: 0.04, alpha: 1),
+        dark: NSColor(srgbRed: 0.98, green: 0.69, blue: 0.25, alpha: 1)
+    )
+    static let agentNeedsInputNS = dynamic(
+        light: NSColor(srgbRed: 0.82, green: 0.24, blue: 0.12, alpha: 1),
+        dark: NSColor(srgbRed: 1.00, green: 0.46, blue: 0.32, alpha: 1)
+    )
+    static let agentDoneNS = dynamic(
+        light: NSColor(srgbRed: 0.11, green: 0.53, blue: 0.27, alpha: 1),
+        dark: NSColor(srgbRed: 0.30, green: 0.83, blue: 0.48, alpha: 1)
+    )
 
     static var workspaceBackground: Color { Color(nsColor: workspaceBackgroundNS) }
     static var chrome: Color { Color(nsColor: chromeNS) }
@@ -62,6 +74,9 @@ enum ColermTheme {
     static var palettePrimaryText: Color { Color(nsColor: palettePrimaryTextNS) }
     static var paletteSecondaryText: Color { Color(nsColor: paletteSecondaryTextNS) }
     static var paletteAccent: Color { Color(nsColor: paletteAccentNS) }
+    static var agentRunning: Color { Color(nsColor: agentRunningNS) }
+    static var agentNeedsInput: Color { Color(nsColor: agentNeedsInputNS) }
+    static var agentDone: Color { Color(nsColor: agentDoneNS) }
     static var primaryText: Color { Color(nsColor: .labelColor) }
     static var secondaryText: Color { Color(nsColor: .secondaryLabelColor) }
     static var tertiaryText: Color { Color(nsColor: .tertiaryLabelColor) }

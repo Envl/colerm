@@ -1,4 +1,5 @@
 import Foundation
+import GhosttyTerminal
 
 @MainActor
 final class GhosttyRuntime {
@@ -41,14 +42,23 @@ final class GhosttyRuntime {
 
 private enum GhosttyResources {
     static var resourceURL: URL? {
+        if let bundled = GhosttyRuntimeResources.directoryURL,
+           hasZshIntegration(in: bundled)
+        {
+            return bundled
+        }
         let candidate = Bundle.main.resourceURL
             ?? Bundle.main.bundleURL.appendingPathComponent("Contents/Resources", isDirectory: true)
-        let shellIntegration = candidate.appendingPathComponent(
-            "shell-integration/zsh/ghostty-integration"
-        )
-        guard FileManager.default.fileExists(atPath: shellIntegration.path) else {
+        guard hasZshIntegration(in: candidate) else {
             return nil
         }
         return candidate
+    }
+
+    private static func hasZshIntegration(in directory: URL) -> Bool {
+        let shellIntegration = directory.appendingPathComponent(
+            "shell-integration/zsh/ghostty-integration"
+        )
+        return FileManager.default.fileExists(atPath: shellIntegration.path)
     }
 }

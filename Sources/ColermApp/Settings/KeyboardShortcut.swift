@@ -139,6 +139,10 @@ struct KeyboardShortcut: Codable, Equatable, Sendable {
 }
 
 enum FixedAppShortcut {
+    static let findInDiffs = KeyboardShortcut(
+        keyCode: UInt16(kVK_ANSI_F), modifiers: [.command], keyLabel: "F"
+    )
+
     static func terminalNumber(for event: NSEvent) -> Int? {
         terminalNumber(
             keyCode: event.keyCode,

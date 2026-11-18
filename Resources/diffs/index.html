@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Diffs</title>
+  <style>
+    :root {
+      --colerm-bg: #0e0e0e;
+      --colerm-card-border: rgba(255, 255, 255, 0.09);
+      --colerm-card-header-bg: #181818;
+      --colerm-fg: rgba(255, 255, 255, 0.88);
+      --colerm-fg-secondary: rgba(255, 255, 255, 0.55);
+      --colerm-fg-tertiary: rgba(255, 255, 255, 0.36);
+      --colerm-hover-bg: rgba(255, 255, 255, 0.045);
+      --colerm-action-fg: #69b1ff;
+      --colerm-action-bg: rgba(105, 177, 255, 0.14);
+
+      --diffs-font-family: "SF Mono", ui-monospace, Menlo, Monaco, monospace;
+      --diffs-header-font-family: "SF Mono", ui-monospace, Menlo, Monaco, monospace;
+      --diffs-font-size: 11.5px;
+      --diffs-line-height: 18px;
+      --diffs-gap-inline: 8px;
+      --diffs-gap-block: 5px;
+      color-scheme: dark;
+    }
+
+    html[data-theme="light"] {
+      --colerm-bg: #f6f6f6;
+      --colerm-card-border: rgba(0, 0, 0, 0.09);
+      --colerm-card-header-bg: #f3f3f3;
+      --colerm-fg: rgba(0, 0, 0, 0.88);
+      --colerm-fg-secondary: rgba(0, 0, 0, 0.54);
+      --colerm-fg-tertiary: rgba(0, 0, 0, 0.38);
+      --colerm-hover-bg: rgba(0, 0, 0, 0.04);
+      --colerm-action-fg: #0b65c6;
+      --colerm-action-bg: rgba(11, 101, 198, 0.11);
+      color-scheme: light;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html, body {
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      min-height: 100%;
+      background: var(--colerm-bg);
+      color: var(--colerm-fg);
+      font-family: "SF Mono", ui-monospace, Menlo, Monaco, monospace;
+      -webkit-font-smoothing: antialiased;
+      overscroll-behavior-x: none;
+    }
+
+    #diffs-list {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      padding: 8px;
+    }
+
+    #diffs-list[hidden],
+    #status-state[hidden] {
+      display: none !important;
+    }
+
+    .diff-card {
+      border: 1px solid var(--colerm-card-border);
+      border-radius: 7px;
+      /* Clip the rounded corners without creating a scroll container for the header. */
+      overflow: clip;
+      background: var(--colerm-card-header-bg);
+    }
+
+    diffs-container {
+      display: block;
+      width: 100%;
+    }
+
+    .colerm-collapse-chevron {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 12px;
+      height: 12px;
+      opacity: 0.65;
+      transition: transform 0.14s ease;
+      flex-shrink: 0;
+    }
+
+    .colerm-collapse-chevron[data-collapsed="true"] {
+      transform: rotate(-90deg);
+    }
+
+    .note-card-header {
+      position: sticky;
+      top: 0;
+      z-index: 1;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 7px 10px;
+      font-size: 11px;
+      font-weight: 500;
+      cursor: pointer;
+      user-select: none;
+      -webkit-user-select: none;
+      background: var(--colerm-card-header-bg);
+    }
+
+    .note-kind-badge {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 15px;
+      height: 15px;
+      border-radius: 3.5px;
+      font-size: 9px;
+      font-weight: 700;
+      flex-shrink: 0;
+      color: #69b1ff;
+      background: rgba(105, 177, 255, 0.15);
+    }
+
+    .note-kind-badge.kind-a,
+    .note-kind-badge.kind-u {
+      color: #5ecc71;
+      background: rgba(94, 204, 113, 0.15);
+    }
+
+    .note-kind-badge.kind-d {
+      color: #ff6762;
+      background: rgba(255, 103, 98, 0.15);
+    }
+
+    .note-card-title {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      min-width: 0;
+      flex: 1;
+    }
+
+    .note-card-body {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      border-top: 1px solid var(--colerm-card-border);
+      padding: 8px 12px;
+      font-size: 10.5px;
+      color: var(--colerm-fg-secondary);
+    }
+
+    .note-card-body[hidden],
+    .truncated-banner[hidden] {
+      display: none !important;
+    }
+
+    .note-card-body.is-actionable {
+      cursor: pointer;
+      user-select: none;
+      -webkit-user-select: none;
+      transition: background-color 0.12s ease;
+    }
+
+    .note-card-body.is-actionable:hover {
+      background: var(--colerm-hover-bg);
+    }
+
+    .note-summary {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .note-load-action {
+      flex-shrink: 0;
+      padding: 2px 7px;
+      border-radius: 4px;
+      font-size: 10px;
+      font-weight: 500;
+      color: var(--colerm-action-fg);
+      background: var(--colerm-action-bg);
+    }
+
+    .note-image-wrap {
+      width: 100%;
+      display: flex;
+      justify-content: center;
+      padding: 4px 0;
+    }
+
+    .note-preview-image {
+      max-width: 100%;
+      max-height: 360px;
+      object-fit: contain;
+      border-radius: 4px;
+      display: block;
+    }
+
+    .truncated-banner {
+      border-top: 1px solid var(--colerm-card-border);
+      padding: 6px 12px;
+      font-size: 10px;
+      color: var(--colerm-fg-tertiary);
+      background: var(--colerm-card-header-bg);
+    }
+
+    #status-state {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      min-height: calc(100vh - 16px);
+      padding: 24px;
+      text-align: center;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+
+    .status-check {
+      width: 24px;
+      height: 24px;
+      border-radius: 50%;
+      border: 1.5px solid var(--colerm-fg-tertiary);
+      color: var(--colerm-fg-tertiary);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 12px;
+    }
+
+    .status-spinner {
+      width: 16px;
+      height: 16px;
+      border-radius: 50%;
+      border: 2px solid var(--colerm-card-border);
+      border-top-color: var(--colerm-fg-secondary);
+      animation: colerm-spin 0.75s linear infinite;
+    }
+
+    .status-label {
+      font-size: 11px;
+      color: var(--colerm-fg-secondary);
+    }
+
+    @keyframes colerm-spin {
+      to { transform: rotate(360deg); }
+    }
+  </style>
+</head>
+<body>
+  <div id="status-state">
+    <div class="status-spinner"></div>
+    <div class="status-label">Loading diffs…</div>
+  </div>
+  <div id="diffs-list" hidden></div>
+  <script src="./pierre-diffs.js"></script>
+</body>
+</html>

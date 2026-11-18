@@ -3,8 +3,8 @@ import SwiftUI
 
 @MainActor
 final class ColumnPagerController: NSViewController {
-    private static let splitterLayoutWidth: CGFloat = 1
-    private static let splitterHitWidth: CGFloat = 5
+    fileprivate static let splitterLayoutWidth: CGFloat = 1
+    fileprivate static let splitterHitWidth: CGFloat = 5
     private static let minimumAddTerminalWidth: CGFloat = 48
 
     private let store: WorkspaceStore
@@ -113,6 +113,32 @@ final class ColumnPagerController: NSViewController {
         selectColumn(at: currentIndex + 1)
     }
 
+    func columnFrame(for sessionID: TerminalSessionID) -> NSRect? {
+        columnViews[sessionID]?.frame
+    }
+
+    func terminalFrame(for sessionID: TerminalSessionID) -> NSRect? {
+        columnViews[sessionID]?.terminalSurface?.frame
+    }
+
+    func diffSidebarFrame(for sessionID: TerminalSessionID) -> NSRect? {
+        columnViews[sessionID]?.diffSidebarFrame
+    }
+
+    var selectedDiffSearchView: PierreDiffsSearchView? {
+        guard let selectedID = store.selectedSessionID else { return nil }
+        return columnViews[selectedID]?.visibleDiffSearchView
+    }
+
+    func findInSelectedDiffs() -> Bool {
+        guard let searchView = selectedDiffSearchView else { return false }
+        var frame = searchView.convert(searchView.bounds, to: documentView)
+        frame.size.width = min(frame.width, scrollView.contentView.bounds.width)
+        revealIfNeeded(frame)
+        searchView.showFindBar()
+        return true
+    }
+
     private var currentIndex: Int {
         guard let selectedID = store.selectedSessionID,
               let index = store.sessions.firstIndex(where: { $0.id == selectedID })
@@ -142,6 +168,36 @@ final class ColumnPagerController: NSViewController {
                     onSelect: { [weak self] in
                         self?.selectColumnFromPointer(sessionID)
                     },
+                    onRequestBranches: { [weak self] in
+                        await self?.store.listBranches(for: sessionID)
+                    },
+                    onSelectBranch: { [weak self] branch in
+                        self?.switchBranch(branch, for: sessionID)
+                    },
+                    onToggleDiffs: { [weak self] in
+                        self?.toggleDiffSidebar(for: sessionID)
+                    },
+                    onRefreshDiffs: { [weak self] in
+                        self?.store.refreshDiff(for: sessionID)
+                    },
+                    onCloseDiffs: { [weak self] in
+                        self?.hideDiffSidebar(for: sessionID)
+                    },
+                    onLoadFileDetail: { [weak self] path, kind in
+                        await self?.store.loadDiffFileDetail(
+                            relativePath: path,
+                            kind: kind,
+                            for: sessionID
+                        )
+                    },
+                    onResizeTerminalWidth: { [weak self, weak session] delta in
+                        guard let self, let session else { return }
+                        session.updateColumnWidth(session.columnWidth + delta)
+                        self.layoutDocument()
+                    },
+                    onResizeTerminalEnd: { [weak self] in
+                        self?.store.save()
+                    },
                     onNewTerminal: { [weak self] in
                         self?.store.addColumn()
                     },
@@ -164,7 +220,11 @@ final class ColumnPagerController: NSViewController {
                 let splitter = TerminalSplitterView(frame: .zero)
                 splitter.onResize = { [weak self, weak session] delta in
                     guard let self, let session else { return }
-                    session.updateColumnWidth(session.columnWidth + delta)
+                    if session.isDiffSidebarVisible {
+                        session.updateDiffSidebarWidth(session.diffSidebarWidth + delta)
+                    } else {
+                        session.updateColumnWidth(session.columnWidth + delta)
+                    }
                     self.layoutDocument()
                 }
                 splitter.onResizeEnd = { [weak self] in
@@ -181,13 +241,17 @@ final class ColumnPagerController: NSViewController {
         var x: CGFloat = 0
 
         for session in store.sessions {
-            columnViews[session.id]?.frame = NSRect(
-                x: x,
-                y: 0,
-                width: session.columnWidth,
-                height: height
-            )
-            x += session.columnWidth
+            let width = session.effectiveColumnWidth
+            if let column = columnViews[session.id] {
+                column.frame = NSRect(
+                    x: x,
+                    y: 0,
+                    width: width,
+                    height: height
+                )
+                column.needsLayout = true
+            }
+            x += width
 
             splitterViews[session.id]?.frame = NSRect(
                 x: x - (Self.splitterHitWidth - Self.splitterLayoutWidth) / 2,
@@ -219,7 +283,52 @@ final class ColumnPagerController: NSViewController {
         for splitter in splitterViews.values {
             documentView.addSubview(splitter, positioned: .above, relativeTo: nil)
         }
+        if !isProgrammaticScroll {
+            let maximumX = max(documentView.bounds.width - scrollView.contentView.bounds.width, 0)
+            if scrollView.contentView.bounds.origin.x > maximumX {
+                scrollView.contentView.setBoundsOrigin(NSPoint(x: maximumX, y: 0))
+                scrollView.reflectScrolledClipView(scrollView.contentView)
+            }
+        }
         updateSurfaceVisibility()
+    }
+
+    private func switchBranch(_ branch: GitBranch, for sessionID: TerminalSessionID) {
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            let result = await store.switchBranch(to: branch, for: sessionID)
+            if case .failure(let error) = result {
+                presentBranchSwitchError(error)
+            }
+        }
+    }
+
+    private func presentBranchSwitchError(_ error: GitBranchSwitchError) {
+        let alert = NSAlert()
+        alert.messageText = "Could Not Switch to “\(error.branchName)”"
+        alert.informativeText = error.message
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "OK")
+        if let window = view.window {
+            alert.beginSheetModal(for: window)
+        } else {
+            alert.runModal()
+        }
+    }
+
+    private func toggleDiffSidebar(for sessionID: TerminalSessionID) {
+        suppressSelectionScroll = true
+        store.select(sessionID)
+        let isNowVisible = store.toggleDiffSidebar(for: sessionID)
+        synchronize()
+        if isNowVisible, let frame = columnViews[sessionID]?.frame {
+            revealIfNeeded(frame)
+        }
+    }
+
+    private func hideDiffSidebar(for sessionID: TerminalSessionID) {
+        store.setDiffSidebarVisible(false, for: sessionID)
+        synchronize()
     }
 
     private func selectColumn(at index: Int) {
@@ -267,6 +376,29 @@ final class ColumnPagerController: NSViewController {
         let maximumX = max(documentView.bounds.width - viewportWidth, 0)
         let centeredX = frame.midX - viewportWidth / 2
         let destination = NSPoint(x: min(max(centeredX, 0), maximumX), y: 0)
+        animateScroll(to: destination)
+    }
+
+    private func revealIfNeeded(_ frame: NSRect) {
+        let viewportWidth = scrollView.contentView.bounds.width
+        guard viewportWidth > 0 else { return }
+        let visibleRect = scrollView.documentVisibleRect
+        let maximumX = max(documentView.bounds.width - viewportWidth, 0)
+
+        if frame.minX >= visibleRect.minX && frame.maxX <= visibleRect.maxX {
+            return
+        }
+
+        let targetX: CGFloat
+        if frame.maxX > visibleRect.maxX {
+            targetX = min(max(frame.maxX - viewportWidth, 0), maximumX)
+        } else {
+            targetX = min(max(frame.minX, 0), maximumX)
+        }
+        animateScroll(to: NSPoint(x: targetX, y: 0))
+    }
+
+    private func animateScroll(to destination: NSPoint) {
         guard destination != scrollView.contentView.bounds.origin else {
             updateSurfaceVisibility()
             return
@@ -297,6 +429,7 @@ final class ColumnPagerController: NSViewController {
             let isSelected = session.id == store.selectedSessionID
             session.setOccluded(!isSelected && !frame.intersects(visibleRect))
         }
+        columnViews.values.forEach { $0.refreshHoverState() }
         splitterViews.values.forEach { $0.refreshHoverState() }
     }
 
@@ -330,24 +463,55 @@ final class ColumnPagerController: NSViewController {
 private final class TerminalColumnView: NSView {
     private static let titleHeight: CGFloat = 28
 
+    private let session: TerminalSession
     private let titleView: NSHostingView<TerminalTitleBarView>
     private weak var terminalView: NSView?
+    private let internalSplitterView = TerminalSplitterView(frame: .zero)
+    private var diffSidebarView: NSHostingView<TerminalDiffSidebarView>?
+    private weak var diffSearchView: PierreDiffsSearchView?
+    private let onSelectColumn: () -> Void
+    private let onRefreshDiffs: () -> Void
+    private let onCloseDiffs: () -> Void
+    private let onLoadFileDetail: (String, String) async -> GitLoadedFileDetail?
 
     var terminalSurface: NSView? { terminalView }
+    var visibleDiffSearchView: PierreDiffsSearchView? {
+        session.isDiffSidebarVisible ? diffSearchView : nil
+    }
+    var diffSidebarFrame: NSRect? {
+        guard let diffSidebarView, !diffSidebarView.isHidden else { return nil }
+        return diffSidebarView.frame
+    }
 
     init(
         session: TerminalSession,
         onSelect: @escaping () -> Void,
+        onRequestBranches: @escaping () async -> GitBranchList?,
+        onSelectBranch: @escaping (GitBranch) -> Void,
+        onToggleDiffs: @escaping () -> Void,
+        onRefreshDiffs: @escaping () -> Void,
+        onCloseDiffs: @escaping () -> Void,
+        onLoadFileDetail: @escaping (String, String) async -> GitLoadedFileDetail?,
+        onResizeTerminalWidth: @escaping (CGFloat) -> Void,
+        onResizeTerminalEnd: @escaping () -> Void,
         onNewTerminal: @escaping () -> Void,
         onCloseTerminal: @escaping () -> Void,
         onOpenSettings: @escaping () -> Void,
         onCycleTerminal: @escaping (Int) -> Void,
         shortcutSettings: KeyboardShortcutSettings
     ) {
+        self.session = session
+        self.onSelectColumn = onSelect
+        self.onRefreshDiffs = onRefreshDiffs
+        self.onCloseDiffs = onCloseDiffs
+        self.onLoadFileDetail = onLoadFileDetail
         titleView = NSHostingView(
             rootView: TerminalTitleBarView(
                 session: session,
-                onSelect: onSelect
+                onSelect: onSelect,
+                onRequestBranches: onRequestBranches,
+                onSelectBranch: onSelectBranch,
+                onToggleDiffs: onToggleDiffs
             )
         )
         terminalView = session.view
@@ -355,6 +519,12 @@ private final class TerminalColumnView: NSView {
         wantsLayer = true
         addSubview(titleView)
         addSubview(session.view)
+
+        internalSplitterView.isHidden = true
+        internalSplitterView.onResize = onResizeTerminalWidth
+        internalSplitterView.onResizeEnd = onResizeTerminalEnd
+        addSubview(internalSplitterView)
+
         if let terminalView = session.view as? TerminalSurfaceView {
             terminalView.onSelect = onSelect
             terminalView.onNewTerminal = onNewTerminal
@@ -371,18 +541,75 @@ private final class TerminalColumnView: NSView {
 
     override func layout() {
         super.layout()
+        let terminalWidth = min(session.columnWidth, bounds.width)
+        let titleHeight = min(Self.titleHeight, bounds.height)
+        let contentHeight = max(bounds.height - Self.titleHeight, 0)
+
         titleView.frame = NSRect(
             x: 0,
             y: max(bounds.height - Self.titleHeight, 0),
-            width: bounds.width,
-            height: min(Self.titleHeight, bounds.height)
+            width: terminalWidth,
+            height: titleHeight
         )
         terminalView?.frame = NSRect(
             x: 0,
             y: 0,
-            width: bounds.width,
-            height: max(bounds.height - Self.titleHeight, 0)
+            width: terminalWidth,
+            height: contentHeight
         )
+
+        if session.isDiffSidebarVisible {
+            let dividerWidth = TerminalSession.diffSidebarDividerWidth
+            let sidebarX = terminalWidth + dividerWidth
+            let sidebarWidth = max(bounds.width - sidebarX, 0)
+            let sidebar = ensureDiffSidebarView()
+            sidebar.isHidden = false
+            sidebar.frame = NSRect(
+                x: sidebarX,
+                y: 0,
+                width: sidebarWidth,
+                height: bounds.height
+            )
+
+            internalSplitterView.isHidden = false
+            internalSplitterView.frame = NSRect(
+                x: terminalWidth - (ColumnPagerController.splitterHitWidth - dividerWidth) / 2,
+                y: 0,
+                width: ColumnPagerController.splitterHitWidth,
+                height: bounds.height
+            )
+            addSubview(internalSplitterView, positioned: .above, relativeTo: nil)
+        } else {
+            diffSearchView?.hideFindBar(restoringFocusTo: terminalView)
+            diffSidebarView?.isHidden = true
+            internalSplitterView.isHidden = true
+        }
+    }
+
+    func refreshHoverState() {
+        guard !internalSplitterView.isHidden else { return }
+        internalSplitterView.refreshHoverState()
+    }
+
+    private func ensureDiffSidebarView() -> NSHostingView<TerminalDiffSidebarView> {
+        if let diffSidebarView {
+            return diffSidebarView
+        }
+        let hostingView = NSHostingView(
+            rootView: TerminalDiffSidebarView(
+                session: session,
+                onSelect: onSelectColumn,
+                onRefresh: onRefreshDiffs,
+                onClose: onCloseDiffs,
+                onLoadFileDetail: onLoadFileDetail,
+                onCreateSearchView: { [weak self] searchView in
+                    self?.diffSearchView = searchView
+                }
+            )
+        )
+        addSubview(hostingView, positioned: .below, relativeTo: internalSplitterView)
+        diffSidebarView = hostingView
+        return hostingView
     }
 }
 

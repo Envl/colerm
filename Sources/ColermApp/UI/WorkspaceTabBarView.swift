@@ -217,7 +217,9 @@ private struct WorkspaceTab: View {
     }
 
     private var isDotLit: Bool {
-        isSelected || session.isForegroundCommandRunning
+        isSelected
+            || session.agentStatus?.phase.isBlocked == true
+            || (session.isForegroundCommandRunning && session.agentStatus?.phase != .idle)
     }
 
     var body: some View {
@@ -237,12 +239,18 @@ private struct WorkspaceTab: View {
                     .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(isSelected ? ColermTheme.primaryText : ColermTheme.secondaryText)
                     .lineLimit(1)
+                    .layoutPriority(1)
 
                 if let branch = session.metadata.git?.branch {
                     Text(branch)
                         .font(.system(size: 10, weight: .regular, design: .monospaced))
                         .foregroundStyle(ColermTheme.tertiaryText)
                         .lineLimit(1)
+                        .layoutPriority(-1)
+                }
+
+                if let agentStatus = session.agentStatus, agentStatus.isVisibleInTab {
+                    AgentStatusBadge(status: agentStatus)
                 }
 
                 Spacer(minLength: 26)
@@ -312,6 +320,93 @@ private struct WorkspaceTab: View {
             cwd: session.cwd,
             gitRoot: session.metadata.git?.root
         )
+    }
+}
+
+struct AgentStatusBadge: View {
+    let status: AgentSessionStatus
+
+    private var tint: Color {
+        switch status.phase {
+        case .running:
+            return ColermTheme.agentRunning
+        case .needsInput:
+            return ColermTheme.agentNeedsInput
+        case .done, .idle:
+            return ColermTheme.agentDone
+        }
+    }
+
+    @ViewBuilder
+    private var icon: some View {
+        switch status.phase {
+        case .running:
+            AgentSpinnerIcon(tint: tint)
+                .frame(width: 8.5, height: 8.5)
+        case .needsInput(let kind):
+            Image(systemName: Self.blockedSymbolName(for: kind))
+                .font(.system(size: 8.5, weight: .bold))
+        case .done, .idle:
+            Image(systemName: "checkmark")
+                .font(.system(size: 8, weight: .bold))
+        }
+    }
+
+    private static func blockedSymbolName(for kind: AgentBlockedKind) -> String {
+        switch kind {
+        case .question:
+            return "questionmark"
+        case .permission:
+            return "hand.raised.fill"
+        case .auth:
+            return "key.fill"
+        case .input:
+            return "exclamationmark"
+        }
+    }
+
+    var body: some View {
+        HStack(spacing: 4) {
+            icon
+
+            Text(status.badgeLabel)
+                .font(.system(size: 9.5, weight: .semibold))
+                .lineLimit(1)
+        }
+        .foregroundStyle(tint)
+        .padding(.horizontal, 6)
+        .padding(.vertical, 2)
+        .background(tint.opacity(0.14), in: Capsule())
+        .overlay {
+            Capsule()
+                .strokeBorder(tint.opacity(0.28), lineWidth: 0.5)
+        }
+        .fixedSize()
+        .help(status.helpText)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(status.helpText)
+    }
+}
+
+private struct AgentSpinnerIcon: View {
+    let tint: Color
+
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 1.0 / 20.0)) { context in
+            let angle = (context.date.timeIntervalSinceReferenceDate * 360.0)
+                .truncatingRemainder(dividingBy: 360.0)
+            ZStack {
+                Circle()
+                    .stroke(tint.opacity(0.25), lineWidth: 1.4)
+                Circle()
+                    .trim(from: 0, to: 0.68)
+                    .stroke(
+                        tint,
+                        style: StrokeStyle(lineWidth: 1.4, lineCap: .round)
+                    )
+                    .rotationEffect(.degrees(angle))
+            }
+        }
     }
 }
 

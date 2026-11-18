@@ -11,10 +11,13 @@ enum GhosttyAction {
     case gotoColumn(Int)
     case workingDirectory(TerminalSessionID, URL)
     case title(TerminalSessionID, String)
-    case commandStarted(TerminalSessionID)
+    case commandStarted(TerminalSessionID, commandLine: String?)
     case commandFinished(TerminalSessionID, Int32?)
+    case progressReport(TerminalSessionID, GhosttyProgressState)
+    case userInput(TerminalSessionID, TerminalUserInputKind)
+    case agentStatusHint(TerminalSessionID, String)
     case columnMetadata(TerminalSessionID, String)
-    case desktopNotification(title: String, body: String)
+    case desktopNotification(TerminalSessionID, title: String, body: String)
     case ringBell(TerminalSessionID)
     case openURL(URL)
     case secureInput(Bool)
@@ -26,6 +29,7 @@ final class WorkspaceStore: ObservableObject {
     let runtime: GhosttyRuntime
     let persistence: WorkspacePersistence
     let gitInspector: GitInspector
+    let agentInspector: any AgentProcessInspecting
 
     @Published private(set) var sessions: [TerminalSession] = []
     @Published private(set) var selectedSessionID: TerminalSessionID?
@@ -35,7 +39,9 @@ final class WorkspaceStore: ObservableObject {
     @Published private(set) var secureInputEnabled = false
 
     private var gitInspectionTasks: [TerminalSessionID: Task<Void, Never>] = [:]
+    private var diffInspectionTasks: [TerminalSessionID: Task<Void, Never>] = [:]
     private var activityTimer: Timer?
+    private var activityTickCount = 0
 
     convenience init() {
         self.init(
@@ -48,11 +54,13 @@ final class WorkspaceStore: ObservableObject {
     init(
         persistence: WorkspacePersistence,
         runtime: GhosttyRuntime,
-        gitInspector: GitInspector
+        gitInspector: GitInspector,
+        agentInspector: (any AgentProcessInspecting)? = nil
     ) {
         self.persistence = persistence
         self.runtime = runtime
         self.gitInspector = gitInspector
+        self.agentInspector = agentInspector ?? SystemAgentProcessInspector()
         runtime.onAction = { [weak self] action in
             self?.handle(action)
         }
@@ -64,6 +72,7 @@ final class WorkspaceStore: ObservableObject {
 
     deinit {
         gitInspectionTasks.values.forEach { $0.cancel() }
+        diffInspectionTasks.values.forEach { $0.cancel() }
         activityTimer?.invalidate()
     }
 
@@ -145,6 +154,8 @@ final class WorkspaceStore: ObservableObject {
 
         gitInspectionTasks[sessionID]?.cancel()
         gitInspectionTasks.removeValue(forKey: sessionID)
+        diffInspectionTasks[sessionID]?.cancel()
+        diffInspectionTasks.removeValue(forKey: sessionID)
         session.close()
         if let ghosttySession = session.engine as? GhosttySession {
             runtime.destroySession(ghosttySession)
@@ -164,8 +175,13 @@ final class WorkspaceStore: ObservableObject {
     func select(_ sessionID: TerminalSessionID, persist: Bool = true) {
         guard sessions.contains(where: { $0.id == sessionID }) else { return }
         selectionActivationID = UUID()
+        bellSessionIDs.remove(sessionID)
         if selectedSessionID == sessionID {
+            let hadCompletedAgent = selectedSession?.agentStatus?.phase == .done
             selectedSession?.setActive(true)
+            if hadCompletedAgent {
+                objectWillChange.send()
+            }
             if let selectedSession {
                 refreshMetadata(for: selectedSession, force: true)
             }
@@ -227,6 +243,11 @@ final class WorkspaceStore: ObservableObject {
         gitInspectionTasks[session.id]?.cancel()
         guard let directory = session.cwd else {
             session.updateGit(nil)
+            if session.isDiffSidebarVisible {
+                session.setDiffSidebarVisible(false)
+                session.updateDiffSnapshot(nil)
+                objectWillChange.send()
+            }
             return
         }
 
@@ -239,8 +260,124 @@ final class WorkspaceStore: ObservableObject {
             guard !Task.isCancelled else { return }
             guard let self, let session, session.cwd == directory else { return }
             session.updateGit(result)
+            if result == nil, session.isDiffSidebarVisible {
+                session.setDiffSidebarVisible(false)
+                session.updateDiffSnapshot(nil)
+            } else if session.isDiffSidebarVisible {
+                self.refreshDiff(for: session)
+            }
             self.objectWillChange.send()
         }
+    }
+
+    func listBranches(for sessionID: TerminalSessionID) async -> GitBranchList? {
+        guard let directory = session(for: sessionID)?.cwd else { return nil }
+        return await gitInspector.listBranches(directory: directory)
+    }
+
+    func switchBranch(
+        to branch: GitBranch,
+        for sessionID: TerminalSessionID
+    ) async -> Result<Void, GitBranchSwitchError> {
+        guard let targetSession = session(for: sessionID),
+              let directory = targetSession.cwd
+        else {
+            return .failure(
+                GitBranchSwitchError(
+                    branchName: branch.localName,
+                    message: "Terminal has no active working directory."
+                )
+            )
+        }
+
+        let gitRoot = targetSession.metadata.git?.root
+        let result = await gitInspector.switchBranch(branch, directory: directory)
+        if case .success = result {
+            for candidate in sessions {
+                if candidate.id == sessionID
+                    || (gitRoot != nil && candidate.metadata.git?.root == gitRoot)
+                    || candidate.cwd?.standardizedFileURL == directory.standardizedFileURL {
+                    refreshMetadata(for: candidate, force: true)
+                }
+            }
+        }
+        return result
+    }
+
+    @discardableResult
+    func toggleDiffSidebar(for sessionID: TerminalSessionID) -> Bool {
+        guard let session = session(for: sessionID) else { return false }
+        let isVisible = session.toggleDiffSidebar()
+        if isVisible {
+            refreshDiff(for: session)
+        } else {
+            diffInspectionTasks[session.id]?.cancel()
+            diffInspectionTasks.removeValue(forKey: session.id)
+        }
+        objectWillChange.send()
+        return isVisible
+    }
+
+    func setDiffSidebarVisible(_ visible: Bool, for sessionID: TerminalSessionID) {
+        guard let session = session(for: sessionID),
+              session.isDiffSidebarVisible != visible
+        else { return }
+        session.setDiffSidebarVisible(visible)
+        if visible {
+            refreshDiff(for: session)
+        } else {
+            diffInspectionTasks[session.id]?.cancel()
+            diffInspectionTasks.removeValue(forKey: session.id)
+        }
+        objectWillChange.send()
+    }
+
+    func refreshDiff(for sessionID: TerminalSessionID) {
+        guard let session = session(for: sessionID) else { return }
+        refreshDiff(for: session)
+    }
+
+    func refreshDiff(for session: TerminalSession) {
+        diffInspectionTasks[session.id]?.cancel()
+        guard session.isDiffSidebarVisible, let directory = session.cwd else {
+            session.setLoadingDiff(false)
+            return
+        }
+
+        if session.diffSnapshot == nil {
+            session.setLoadingDiff(true)
+        }
+
+        let inspector = gitInspector
+        diffInspectionTasks[session.id] = Task { [weak self, weak session] in
+            let snapshot = await inspector.inspectDiff(directory: directory)
+            guard !Task.isCancelled else { return }
+            guard let self, let session, session.cwd == directory else { return }
+            session.updateDiffSnapshot(snapshot)
+            if let snapshot, var git = session.metadata.git {
+                git.root = snapshot.root
+                git.branch = snapshot.branch
+                git.changedFiles = snapshot.files.count
+                git.insertions = snapshot.totalInsertions
+                git.deletions = snapshot.totalDeletions
+                session.updateGit(git)
+            }
+            session.setLoadingDiff(false)
+            self.objectWillChange.send()
+        }
+    }
+
+    func loadDiffFileDetail(
+        relativePath: String,
+        kind: String,
+        for sessionID: TerminalSessionID
+    ) async -> GitLoadedFileDetail? {
+        guard let directory = session(for: sessionID)?.cwd else { return nil }
+        return await gitInspector.loadFileDetail(
+            directory: directory,
+            relativePath: relativePath,
+            kind: kind
+        )
     }
 
     func receiveRuntimeMetadata(_ metadata: RuntimeMetadata?, for sessionID: TerminalSessionID) {
@@ -269,23 +406,57 @@ final class WorkspaceStore: ObservableObject {
             refreshMetadata(for: session)
             save()
         case .title(let sessionID, let title):
-            session(for: sessionID)?.updateTitle(title)
-        case .commandStarted(let sessionID):
             guard let session = session(for: sessionID) else { return }
-            session.commandStarted()
+            let previousAgentStatus = session.agentStatus
+            session.updateTitle(title)
+            if session.agentStatus != previousAgentStatus {
+                objectWillChange.send()
+            }
+        case .commandStarted(let sessionID, let commandLine):
+            guard let session = session(for: sessionID) else { return }
+            session.commandStarted(commandLine: commandLine)
             objectWillChange.send()
         case .commandFinished(let sessionID, let exitCode):
             guard let session = session(for: sessionID) else { return }
             session.commandFinished(exitCode: exitCode)
             objectWillChange.send()
             refreshMetadata(for: session)
+        case .progressReport(let sessionID, let state):
+            guard let session = session(for: sessionID) else { return }
+            let previousAgentStatus = session.agentStatus
+            session.handleProgressReport(state)
+            if session.agentStatus != previousAgentStatus {
+                objectWillChange.send()
+            }
+        case .userInput(let sessionID, let inputKind):
+            guard let session = session(for: sessionID) else { return }
+            let previousAgentStatus = session.agentStatus
+            session.handleUserInput(inputKind)
+            if session.agentStatus != previousAgentStatus {
+                objectWillChange.send()
+            }
+        case .agentStatusHint(let sessionID, let rawHint):
+            guard let session = session(for: sessionID) else { return }
+            let previousAgentStatus = session.agentStatus
+            session.handleExplicitAgentStatusHint(rawHint)
+            if session.agentStatus != previousAgentStatus {
+                objectWillChange.send()
+            }
         case .columnMetadata(let sessionID, let encodedPayload):
             guard let update = RuntimeMetadataParser.decodeBase64(encodedPayload) else { return }
             receiveRuntimeMetadata(update.runtime, for: sessionID)
-        case .desktopNotification(let title, let body):
+        case .desktopNotification(let sessionID, let title, let body):
+            if let session = session(for: sessionID) {
+                let previousAgentStatus = session.agentStatus
+                session.handleAgentDesktopNotification(title: title, body: body)
+                if session.agentStatus != previousAgentStatus {
+                    objectWillChange.send()
+                }
+            }
             deliverNotification(title: title, body: body)
         case .ringBell(let sessionID):
             bellSessionIDs.insert(sessionID)
+            session(for: sessionID)?.handleAgentCompletionHint()
         case .openURL(let url):
             guard url.scheme == "https" || url.scheme == "http" else { return }
             NSWorkspace.shared.open(url)
@@ -354,11 +525,24 @@ final class WorkspaceStore: ObservableObject {
         let timer = Timer(timeInterval: 0.5, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in
                 guard let self else { return }
-                let countChanged = sessions.reduce(false) { changed, session in
-                    session.refreshForegroundActivity() || changed
+                activityTickCount += 1
+                var countChanged = false
+                for session in sessions {
+                    let wasAgentRunning = session.agentStatus?.phase == .running
+                    if session.refreshForegroundActivity(agentInspector: agentInspector) {
+                        countChanged = true
+                    }
+                    if wasAgentRunning && session.agentStatus?.phase != .running {
+                        refreshMetadata(for: session, force: true)
+                    }
                 }
                 if countChanged {
                     objectWillChange.send()
+                }
+                if activityTickCount % 6 == 0 {
+                    for session in sessions where session.isDiffSidebarVisible && !session.isOccluded {
+                        refreshMetadata(for: session, force: true)
+                    }
                 }
             }
         }

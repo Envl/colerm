@@ -113,7 +113,8 @@ struct TerminalCommandPaletteView: View {
                 id: session.id,
                 index: index + 1,
                 title: session.displayTitle,
-                path: Self.displayPath(session.cwd)
+                path: Self.displayPath(session.cwd),
+                agentStatus: session.agentStatus
             )
         }
     }
@@ -200,7 +201,11 @@ private struct TerminalPaletteRow: View {
                 .lineLimit(1)
                 .truncationMode(.middle)
 
-            Spacer(minLength: 0)
+            Spacer(minLength: 8)
+
+            if let agentStatus = item.agentStatus, agentStatus.isVisibleInTab {
+                AgentStatusBadge(status: agentStatus)
+            }
 
             if isSelected {
                 Text("↵")

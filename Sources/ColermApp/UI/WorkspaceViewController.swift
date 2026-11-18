@@ -6,6 +6,16 @@ import SwiftUI
 final class WorkspaceViewController: NSViewController {
     let store: WorkspaceStore
 
+    var canFindInDiffs: Bool {
+        viewIfLoaded?.window?.isKeyWindow == true && pagerController.selectedDiffSearchView != nil
+    }
+
+    @discardableResult
+    func findInDiffs() -> Bool {
+        guard canFindInDiffs else { return false }
+        return pagerController.findInSelectedDiffs()
+    }
+
     private let workspaceLayoutSettings: WorkspaceLayoutSettings
     private let pagerController: ColumnPagerController
     private let sidebarResizeHandle = WorkspaceSidebarResizeHandle(frame: .zero)
