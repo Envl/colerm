@@ -18,6 +18,8 @@
   }
 
   const FIRST_PANE_ID = 'colerm'
+  const pageTitle = 'Colerm — Terminal columns for macOS'
+  const pageDescription = 'Run Ghostty terminals side by side on macOS, review Git diffs, and track coding agent status from your tabs.'
 
   function ansiLink(url: string, color: number) {
     return `\x1b[38;5;${color}m${url}\x1b[0m\n`
@@ -30,15 +32,15 @@
       path: '~/Code/colerm',
       cwd: '/home/colerm',
       branch: 'main',
-      gitState: 'clean',
+      gitState: '2 changes',
       diff: '+12 −4',
       accent: '#78dcca',
       intro: [
         '\x1b[38;5;245mLast login: Wed Aug 5 09:42:18 on ttys056\x1b[0m',
         '',
         '\x1b[38;5;114m$ git status --short\x1b[0m',
-        'On branch main',
-        "Your branch is ahead of 'origin/main' by 2 commits.",
+        ' M README.md',
+        ' M Package.swift',
         '',
         '\x1b[38;5;114m$ swift build\x1b[0m',
         'Building for debugging…',
@@ -46,7 +48,7 @@
       ],
       files: {
         '/home/colerm/README.md':
-          '# Colerm\n\nA native workspace where every terminal session has a column.\n',
+          '# Colerm\n\nA native macOS terminal workspace powered by Ghostty.\n',
         '/home/colerm/Package.swift':
           '// swift-tools-version: 6.0\nlet package = Package(name: "Colerm")\n',
         '/home/colerm/Sources/ColermApp/main.swift':
@@ -277,9 +279,9 @@
 </script>
 
 <svelte:head>
-  <title>{dev ? '[dev] - ' : ''}Colerm — terminals, in focus</title>
+  <title>{dev ? '🟠 ' : ''}{pageTitle}</title>
   <meta name="theme-color" content="#090909" />
-  <meta name="description" content="Colerm keeps terminal sessions side by side, so your work stays in view." />
+  <meta name="description" content={pageDescription} />
   <meta name="author" content="Colerm" />
   <meta name="robots" content="index, follow" />
   <link rel="canonical" href="https://colerm.com/" />
@@ -288,8 +290,8 @@
   <meta property="og:locale" content="en_US" />
   <meta property="og:type" content="website" />
   <meta property="og:site_name" content="Colerm" />
-  <meta property="og:title" content="Colerm — terminals, in focus" />
-  <meta property="og:description" content="A native macOS workspace where every terminal session has a column." />
+  <meta property="og:title" content={pageTitle} />
+  <meta property="og:description" content={pageDescription} />
   <meta property="og:url" content="https://colerm.com/" />
   <meta property="og:image" content="https://colerm.com/og.png" />
   <meta property="og:image:alt" content="Colerm terminal workspace" />
@@ -297,8 +299,8 @@
   <meta property="og:image:width" content="1200" />
   <meta property="og:image:height" content="630" />
   <meta name="twitter:card" content="summary_large_image" />
-  <meta name="twitter:title" content="Colerm — terminals, in focus" />
-  <meta name="twitter:description" content="A native macOS workspace where every terminal session has a column." />
+  <meta name="twitter:title" content={pageTitle} />
+  <meta name="twitter:description" content={pageDescription} />
   <meta name="twitter:image" content="https://colerm.com/og.png" />
   <meta name="twitter:image:alt" content="Colerm terminal workspace" />
   <script type="application/ld+json">
@@ -307,9 +309,9 @@
       "@type": "SoftwareApplication",
       "name": "Colerm",
       "url": "https://colerm.com/",
-      "description": "A native macOS workspace where every terminal session has a column.",
+      "description": "A native macOS terminal workspace powered by Ghostty, with resizable columns, Git diffs, and coding agent status in tabs.",
       "applicationCategory": "DeveloperApplication",
-      "operatingSystem": "macOS",
+      "operatingSystem": "macOS 14 or later",
       "image": "https://colerm.com/og.png",
       "codeRepository": "https://github.com/Envl/colerm"
     }
@@ -356,9 +358,9 @@
 
   <main>
     <section class="hero" aria-labelledby="hero-title">
-      <h1 id="hero-title">Terminals, <em>in focus.</em></h1>
+      <h1 id="hero-title">Terminal columns <em>for macOS.</em></h1>
       <p class="hero-copy">
-        Keep every project, prompt, and running process visible in one calm horizontal workspace.
+        Run Ghostty terminals side by side, review Git diffs, and see which coding agents need your attention. Requires macOS 14 or later.
       </p>
       <a class="download-link" href="https://github.com/Envl/colerm/releases/latest/download/Colerm.dmg" rel="external" aria-label="Download Colerm for macOS">
         Download for macOS <span>↓</span>
@@ -367,11 +369,8 @@
 
     <section class="demo-wrap" id="demo" aria-labelledby="demo-title">
       <div class="demo-intro">
-        <div>
-          <p class="eyebrow">The workspace</p>
-          <h2 id="demo-title">Three projects. One glance.</h2>
-        </div>
-        <p class="demo-note">Click a column. Type into any terminal.</p>
+        <h2 id="demo-title">Browser demo</h2>
+        <p class="demo-note">Select a terminal and run commands against sample files.</p>
       </div>
 
       <div class="app-window">
@@ -380,7 +379,6 @@
             <span class="close"></span><span class="minimize"></span><span class="maximize"></span>
           </div>
           <strong>Colerm</strong>
-          <div class="window-search" aria-hidden="true"><span>⌕</span> Search</div>
         </div>
 
         <div class="workspace-tabs" role="tablist" aria-label="Open terminal sessions">
@@ -431,20 +429,36 @@
         </div>
 
         <footer class="window-footer">
-          <span><i class="live-dot"></i> 3 terminals in view · {panes.length} sessions open</span>
+          <span>{panes.length} {panes.length === 1 ? 'terminal' : 'terminals'}</span>
         </footer>
       </div>
     </section>
 
-    <section class="details" id="details" aria-label="Colerm details">
-      <div><span class="detail-number">01</span><strong>See the whole workspace</strong><p>Projects stay beside each other, not behind windows.</p></div>
-      <div><span class="detail-number">02</span><strong>Keep context attached</strong><p>Paths, branches, and live output stay with each session.</p></div>
-      <div><span class="detail-number">03</span><strong>Built for the keyboard</strong><p>Native terminal input, smooth paging, no clutter.</p></div>
+    <section class="details" id="details" aria-labelledby="workspace-title">
+      <div class="feature-heading">
+        <h2 id="workspace-title">The macOS app</h2>
+        <a href="https://github.com/Envl/colerm/releases">Release notes ↗</a>
+      </div>
+      <img
+        class="workspace-screenshot"
+        src="/colerm-workspace.png"
+        alt="Colerm workspace showing Running and Done agent badges beside a split Git diff"
+        width="3328"
+        height="1814"
+        loading="lazy"
+      />
+      <div class="feature-grid">
+        <div><h3>Git branches and diffs</h3><p>Switch branches from the terminal header. Review uncommitted changes in a unified or split view with sticky file titles and <kbd>⌘F</kbd> search.</p></div>
+        <div><h3>Coding agent status</h3><p>Tabs show when a detected agent such as Claude Code or Codex is running, needs input or approval, or has finished.</p></div>
+        <div><h3>Columns and tabs</h3><p>Resize columns, reorder tabs, or move tabs to a resizable sidebar. Colerm reopens fresh shells in your saved working directories.</p></div>
+        <div><h3>Terminal navigation</h3><p>Find sessions with <kbd>⌘P</kbd> or select by position with <kbd>⌘1</kbd> through <kbd>⌘9</kbd>. Customize the palette and cycling shortcuts in Settings.</p></div>
+        <div><h3>Running commands</h3><p>See which terminals are busy and jump to one from the workspace footer. Each column shows its working directory and Git status.</p></div>
+        <div><h3>File and image paste</h3><p>Paste or drop Finder files to insert shell-escaped paths. Paste an image to insert a path to a temporary PNG.</p></div>
+      </div>
     </section>
   </main>
 
   <footer class="site-footer">
     <span>Colerm</span>
-    <span>Made for the Mac.</span>
   </footer>
 </div>

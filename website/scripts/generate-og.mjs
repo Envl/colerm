@@ -53,9 +53,9 @@ const image = new ImageResponse(
     },
       h(
         'div',
-        { style: { display: 'flex', fontSize: 86, fontWeight: 600, letterSpacing: -6, lineHeight: 0.95 } },
-        'Terminals,',
-        h('span', { style: { display: 'flex', color: '#7f7f79' } }, ' in focus.'),
+        { style: { display: 'flex', gap: 16, fontSize: 72, fontWeight: 600, letterSpacing: -5, lineHeight: 0.95 } },
+        'Terminal columns',
+        h('span', { style: { display: 'flex', color: '#7f7f79' } }, 'for macOS.'),
       ),
     ),
     h(
@@ -73,7 +73,7 @@ const image = new ImageResponse(
           letterSpacing: -0.5,
         },
       },
-      'Every project, prompt, and running process visible in one calm workspace.',
+      'Git diffs and coding agent status.',
     ),
     h(
       'div',

@@ -1,10 +1,10 @@
 # Colerm
 
 Colerm is a native macOS terminal workspace powered by Ghostty. Run shells
-side by side in resizable columns and switch between them with tabs or the
-command palette.
+side by side, review Git diffs beside your terminal, and see when coding agents
+are running, need input or approval, or have finished.
 
-![Colerm workspace with vertical tabs, terminal columns, and a split Git diff](docs/images/colerm-workspace.png)
+![Colerm workspace showing Running and Done agent badges beside a split Git diff](website/static/colerm-workspace.png)
 
 [Browser demo](https://colerm.com/#demo) · [Releases](https://github.com/Envl/colerm/releases) · [X](https://x.com/sesampicr) · [Buy me a coffee](https://buymeacoffee.com/envl)
 
@@ -12,15 +12,14 @@ command palette.
 
 ## Workspace
 
+- **Git branches and diffs** — Switch branches from the terminal header. Click the change count to review uncommitted changes in a resizable pane. Choose unified or split view, search with `⌘F`, and keep file titles in view while scrolling.
+- **Coding agent status** — Tabs show when a detected agent is running, needs input or approval, or has finished. Colerm detects Claude Code, Codex, Pi, OpenCode, Grok, Factory Droid, and Antigravity.
 - **Columns and tabs** — Resize terminal columns, drag tabs to reorder them, or enable **Vertical Tabs** in Settings for a resizable sidebar.
 - **Terminal navigation** — Press `⌘P` to find an open terminal, `⌘1` through `⌘9` to select by position, or `⌃Tab` and `⌃⇧Tab` to cycle. Change the palette and cycling shortcuts in Settings (`⌘,`).
 - **Running commands** — See which terminals are busy and jump to a running command from the workspace footer.
 - **Git context** — See the current directory, branch, and change counts in each terminal header.
 - **Session layout** — Colerm remembers terminal order, widths, and working directories. Relaunching starts fresh shells in those directories.
 - **Appearance** — The workspace and terminal palettes follow the system’s light or dark appearance.
-
-- **Git branches and diffs** — Click the branch in a terminal header to switch branches. Click the change count to review uncommitted changes in a resizable pane beside the shell. Choose unified or split view and use `⌘F` to find text in the open diff.
-- **Coding agent status** — Tabs show when a detected agent is running, needs input or approval, or has finished. Colerm detects Claude Code, Codex, Pi, OpenCode, Grok, Factory Droid, and Antigravity.
 - **File and image paste** — Paste or drop Finder files to insert shell-escaped paths. Paste an image to save a temporary PNG and insert its path.
 - **Settings** — Open Settings from the gear next to Search in the window title bar.
 
