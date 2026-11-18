@@ -1,24 +1,28 @@
 # Colerm
 
-Colerm is a native macOS workspace for keeping terminal sessions, projects,
-and running processes visible in one calm horizontal workspace.
-<video src="https://github.com/user-attachments/assets/a0629699-49ab-42cd-8ef3-6bee47f84bfd" controls width="100%"></video>
+Colerm is a native macOS terminal workspace powered by Ghostty. Run shells
+side by side in resizable columns and switch between them with tabs or the
+command palette.
 
-[Live website](https://colerm.com) · [GitHub](https://github.com/Envl/colerm) · [X](https://x.com/sesampicr) · [Buy me a coffee](https://buymeacoffee.com/envl)
+![Colerm workspace with vertical tabs, terminal columns, and a split Git diff](docs/images/colerm-workspace.png)
 
-[Download Colerm for macOS](https://github.com/Envl/colerm/releases/latest/download/Colerm.dmg)
+[Browser demo](https://colerm.com/#demo) · [Releases](https://github.com/Envl/colerm/releases) · [X](https://x.com/sesampicr) · [Buy me a coffee](https://buymeacoffee.com/envl)
 
-> Colerm is early-stage software. Expect sharp edges while the native app and
-> the interactive website demo continue to evolve.
+[Download the latest release for macOS](https://github.com/Envl/colerm/releases/latest/download/Colerm.dmg) · macOS 14 or later
 
-## Highlights
+## Workspace
 
-- AppKit-first terminal surfaces backed by Ghostty.
-- Resizable horizontal terminal columns with persistent session metadata.
-- Drag-to-reorder tabs and `⌘1` through `⌘9` terminal selection.
-- Command palette search for open terminals.
-- Light and dark system appearance support, including terminal palettes.
-- Interactive website demo with multiple virtual workspaces and terminals.
+- **Columns and tabs** — Resize terminal columns, drag tabs to reorder them, or enable **Vertical Tabs** in Settings for a resizable sidebar.
+- **Terminal navigation** — Press `⌘P` to find an open terminal, `⌘1` through `⌘9` to select by position, or `⌃Tab` and `⌃⇧Tab` to cycle. Change the palette and cycling shortcuts in Settings (`⌘,`).
+- **Running commands** — See which terminals are busy and jump to a running command from the workspace footer.
+- **Git context** — See the current directory, branch, and change counts in each terminal header.
+- **Session layout** — Colerm remembers terminal order, widths, and working directories. Relaunching starts fresh shells in those directories.
+- **Appearance** — The workspace and terminal palettes follow the system’s light or dark appearance.
+
+- **Git branches and diffs** — Click the branch in a terminal header to switch branches. Click the change count to review uncommitted changes in a resizable pane beside the shell. Choose unified or split view and use `⌘F` to find text in the open diff.
+- **Coding agent status** — Tabs show when a detected agent is running, needs input or approval, or has finished. Colerm detects Claude Code, Codex, Pi, OpenCode, Grok, Factory Droid, and Antigravity.
+- **File and image paste** — Paste or drop Finder files to insert shell-escaped paths. Paste an image to save a temporary PNG and insert its path.
+- **Settings** — Open Settings from the gear next to Search in the window title bar.
 
 ## Repository layout
 
@@ -64,10 +68,6 @@ regenerate the macOS icon resources:
 ./scripts/prepare_app_icon.sh
 ```
 
-Persisted sessions store reconstructable state such as working directories;
-relaunching creates new shell processes in those directories rather than
-restoring live processes.
-
 ## Releases
 
 Push a protected `v*` tag to build, sign, notarize, and publish the universal
@@ -112,9 +112,8 @@ pnpm install
 pnpm dev
 ```
 
-The local demo runs at [http://127.0.0.1:3990/#demo](http://127.0.0.1:3990/#demo).
-It uses `@wterm/dom` and `@wterm/just-bash` to provide interactive virtual
-terminals without exposing the host shell.
+The [local browser demo](http://127.0.0.1:3990/#demo) uses `@wterm/dom` and
+`@wterm/just-bash`. Run commands against sample files in a virtual shell.
 
 Validate the website before opening a pull request:
 
