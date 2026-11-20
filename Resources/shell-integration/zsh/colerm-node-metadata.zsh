@@ -82,3 +82,120 @@ else
   precmd_functions+=(_colerm_report_runtime_metadata)
   _colerm_report_runtime_metadata
 fi
+
+_colerm_should_wrap_claude() {
+  builtin emulate -L zsh -o no_aliases
+  [[ -n "${COLERM_STATUS_DIR:-}" && -d "${COLERM_STATUS_DIR:-}" &&
+     -n "${COLERM_AGENT_HOOK:-}" && -x "${COLERM_AGENT_HOOK:-}" &&
+     -n "${COLERM_CLAUDE_HOOKS_FILE:-}" && -f "${COLERM_CLAUDE_HOOKS_FILE:-}" ]] || return 1
+
+  builtin local arg expect_value=0 first_positional=""
+  for arg in "$@"; do
+    if (( expect_value )); then
+      expect_value=0
+      continue
+    fi
+    case "$arg" in
+      --)
+        break
+        ;;
+      -h|--help|-v|--version|--settings|--settings=*)
+        return 1
+        ;;
+      --model|--agent|--fallback-model|--output-format|--input-format|--json-schema|--max-budget-usd|--system-prompt|--append-system-prompt|--permission-mode|--setting-sources|--session-id|--agents|--allowedTools|--allowed-tools|--tools|--disallowedTools|--disallowed-tools|--mcp-config|--add-dir|--betas|--plugin-dir)
+        expect_value=1
+        ;;
+      -*)
+        ;;
+      *)
+        if [[ -z "$first_positional" ]]; then
+          first_positional="$arg"
+        fi
+        ;;
+    esac
+  done
+
+  case "$first_positional" in
+    mcp|plugin|plugins|setup-token|doctor|update|install|uninstall|migrate-installer|config|auth|login|logout|help)
+      return 1
+      ;;
+  esac
+  return 0
+}
+
+_colerm_should_wrap_codex() {
+  builtin emulate -L zsh -o no_aliases
+  [[ -n "${COLERM_STATUS_DIR:-}" && -d "${COLERM_STATUS_DIR:-}" &&
+     -n "${COLERM_AGENT_HOOK:-}" && -x "${COLERM_AGENT_HOOK:-}" ]] || return 1
+
+  builtin local codex_config="${CODEX_HOME:-$HOME/.codex}/config.toml"
+  if [[ -r "$codex_config" ]] && /usr/bin/grep -Eq '^[[:space:]]*notify[[:space:]]*=' "$codex_config" 2>/dev/null; then
+    return 1
+  fi
+
+  builtin local arg expect_config=0 expect_value=0 first_positional=""
+  for arg in "$@"; do
+    if (( expect_config )); then
+      expect_config=0
+      [[ "$arg" == notify=* || "$arg" == notify\ =* ]] && return 1
+      continue
+    fi
+    if (( expect_value )); then
+      expect_value=0
+      continue
+    fi
+    case "$arg" in
+      --)
+        break
+        ;;
+      -h|--help|-V|--version)
+        return 1
+        ;;
+      -c|--config)
+        expect_config=1
+        ;;
+      --config=notify=*|-cnotify=*)
+        return 1
+        ;;
+      -m|--model|-p|--profile|-s|--sandbox|-a|--ask-for-approval|-C|--cd|--add-dir|-i|--image|--enable|--disable|--local-provider|--oss-provider)
+        expect_value=1
+        ;;
+      -*)
+        ;;
+      *)
+        if [[ -z "$first_positional" ]]; then
+          first_positional="$arg"
+        fi
+        ;;
+    esac
+  done
+
+  case "$first_positional" in
+    login|logout|mcp|plugin|mcp-server|app-server|remote-control|app|completion|update|doctor|sandbox|debug|apply|a|archive|delete|unarchive|cloud|exec-server|features|help)
+      return 1
+      ;;
+  esac
+  return 0
+}
+
+if (( ! $+functions[claude] )); then
+  claude() {
+    if _colerm_should_wrap_claude "$@"; then
+      builtin command claude --settings "$COLERM_CLAUDE_HOOKS_FILE" "$@"
+    else
+      builtin command claude "$@"
+    fi
+  }
+fi
+
+if (( ! $+functions[codex] )); then
+  codex() {
+    if _colerm_should_wrap_codex "$@"; then
+      builtin local escaped_hook="${COLERM_AGENT_HOOK//\\/\\\\}"
+      escaped_hook="${escaped_hook//\"/\\\"}"
+      builtin command codex -c "notify=[\"${escaped_hook}\",\"codex\",\"notify\"]" "$@"
+    else
+      builtin command codex "$@"
+    fi
+  }
+fi

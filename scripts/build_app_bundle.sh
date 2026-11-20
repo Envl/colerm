@@ -124,7 +124,11 @@ if [[ -n "$GHOSTTY_BUNDLE" ]]; then
   BUNDLED_GHOSTTY="$APP_RESOURCES/$(basename "$GHOSTTY_BUNDLE")"
   ditto "$GHOSTTY_BUNDLE" "$BUNDLED_GHOSTTY"
   chmod -R u+w "$BUNDLED_GHOSTTY"
-  COLERM_GHOSTTY_ZSH_DIR="$BUNDLED_GHOSTTY/Ghostty/shell-integration/zsh"
+  if [[ -f "$BUNDLED_GHOSTTY/Contents/Resources/Ghostty/shell-integration/zsh/ghostty-integration" ]]; then
+    COLERM_GHOSTTY_ZSH_DIR="$BUNDLED_GHOSTTY/Contents/Resources/Ghostty/shell-integration/zsh"
+  else
+    COLERM_GHOSTTY_ZSH_DIR="$BUNDLED_GHOSTTY/Ghostty/shell-integration/zsh"
+  fi
 else
   GHOSTTY_SHARE="$ROOT/Vendor/ghostty/share"
   if [[ -d "$GHOSTTY_SHARE/ghostty" ]]; then
@@ -153,6 +157,15 @@ if [[ ! -f "$COLERM_GHOSTTY_ZSH" ]]; then
 fi
 if [[ -f "$COLERM_METADATA_HOOK" ]]; then
   cp "$COLERM_METADATA_HOOK" "$COLERM_GHOSTTY_ZSH_DIR/colerm-node-metadata.zsh"
+  if [[ -f "$ROOT/Resources/shell-integration/zsh/colerm-agent-hook.sh" ]]; then
+    cp "$ROOT/Resources/shell-integration/zsh/colerm-agent-hook.sh" \
+      "$COLERM_GHOSTTY_ZSH_DIR/colerm-agent-hook.sh"
+    chmod 755 "$COLERM_GHOSTTY_ZSH_DIR/colerm-agent-hook.sh"
+  fi
+  if [[ -f "$ROOT/Resources/shell-integration/zsh/colerm-claude-hooks.json" ]]; then
+    cp "$ROOT/Resources/shell-integration/zsh/colerm-claude-hooks.json" \
+      "$COLERM_GHOSTTY_ZSH_DIR/colerm-claude-hooks.json"
+  fi
   {
     printf '%s\n' '' '# Colerm runtime metadata extension.'
     printf '%s\n' 'if [[ -n "${GHOSTTY_RESOURCES_DIR:-}" &&'
@@ -187,6 +200,9 @@ fi
 } >"$APP_CONTENTS/Info.plist"
 
 if [[ -n "$SIGN_IDENTITY" ]]; then
+  if [[ -n "${BUNDLED_GHOSTTY:-}" && -d "${BUNDLED_GHOSTTY}/Contents/_CodeSignature" ]]; then
+    codesign --force --timestamp --sign "$SIGN_IDENTITY" "$BUNDLED_GHOSTTY"
+  fi
   if [[ -d "$APP_FRAMEWORKS/Sparkle.framework" ]]; then
     codesign \
       --force \

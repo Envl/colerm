@@ -50,12 +50,28 @@ final class TerminalSurfaceView: TerminalView {
 
     override func mouseDown(with event: NSEvent) {
         onSelect?()
+        if isMouseCaptured {
+            onUserInput?(.interaction)
+        }
         super.mouseDown(with: event)
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        if isMouseCaptured {
+            onUserInput?(.interaction)
+        }
+        super.mouseDragged(with: event)
     }
 
     override func scrollWheel(with event: NSEvent) {
         let isHorizontal = abs(event.scrollingDeltaX) > abs(event.scrollingDeltaY) * 1.25
         guard isHorizontal, let enclosingScrollView else {
+            if isMouseCaptured,
+               abs(event.scrollingDeltaY) > 0
+                || abs(event.scrollingDeltaX) > 0
+                || !event.momentumPhase.isEmpty {
+                onUserInput?(.interaction)
+            }
             super.scrollWheel(with: event)
             return
         }
@@ -126,6 +142,13 @@ final class TerminalSurfaceView: TerminalView {
         if modifiers == [.control],
            event.charactersIgnoringModifiers?.lowercased() == "c" {
             return .interrupt
+        }
+
+        if event.keyCode == UInt16(kVK_PageUp)
+            || event.keyCode == UInt16(kVK_PageDown)
+            || event.keyCode == UInt16(kVK_Home)
+            || event.keyCode == UInt16(kVK_End) {
+            return .interaction
         }
 
         if modifiers.contains(.control) {

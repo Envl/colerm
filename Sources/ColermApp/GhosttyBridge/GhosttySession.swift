@@ -23,6 +23,9 @@ final class GhosttySession: TerminalEngineSession {
     init(
         id: UUID,
         options: SessionLaunchOptions,
+        statusDirectoryPath: String? = nil,
+        agentHookPath: String? = nil,
+        claudeHooksFilePath: String? = nil,
         actionHandler: @escaping (GhosttyAction) -> Void
     ) {
         self.id = id
@@ -42,10 +45,20 @@ final class GhosttySession: TerminalEngineSession {
         )
 
         terminalView = TerminalSurfaceView(frame: .zero)
+        var injectedEnvVars: [String: String] = ["COLERM_SESSION_ID": id.uuidString]
+        if let statusDirectoryPath, !statusDirectoryPath.isEmpty {
+            injectedEnvVars["COLERM_STATUS_DIR"] = statusDirectoryPath
+        }
+        if let agentHookPath, !agentHookPath.isEmpty {
+            injectedEnvVars["COLERM_AGENT_HOOK"] = agentHookPath
+        }
+        if let claudeHooksFilePath, !claudeHooksFilePath.isEmpty {
+            injectedEnvVars["COLERM_CLAUDE_HOOKS_FILE"] = claudeHooksFilePath
+        }
         terminalView.configuration = TerminalSurfaceOptions(
             workingDirectory: options.workingDirectory?.path,
             envVars: options.environment.merging(
-                ["COLERM_SESSION_ID": id.uuidString],
+                injectedEnvVars,
                 uniquingKeysWith: { current, _ in current }
             ),
             context: .window
@@ -95,13 +108,13 @@ final class GhosttySession: TerminalEngineSession {
         for row in 0 ..< UInt32(size.rows) {
             let selection = ghostty_selection_s(
                 top_left: ghostty_point_s(
-                    tag: GHOSTTY_POINT_VIEWPORT,
+                    tag: GHOSTTY_POINT_ACTIVE,
                     coord: GHOSTTY_POINT_COORD_EXACT,
                     x: 0,
                     y: row
                 ),
                 bottom_right: ghostty_point_s(
-                    tag: GHOSTTY_POINT_VIEWPORT,
+                    tag: GHOSTTY_POINT_ACTIVE,
                     coord: GHOSTTY_POINT_COORD_EXACT,
                     x: UInt32(size.columns) - 1,
                     y: row
@@ -205,7 +218,8 @@ extension GhosttySession:
     TerminalSurfaceBellDelegate,
     TerminalSurfaceCloseDelegate,
     TerminalSurfaceLifecycleDelegate,
-    TerminalSurfaceOpenURLDelegate
+    TerminalSurfaceOpenURLDelegate,
+    TerminalSurfaceResizeDelegate
 {
     func terminalDidAttachSurface(_ surface: TerminalSurface) {
         hasSurface = true
@@ -215,6 +229,10 @@ extension GhosttySession:
     func terminalDidDetachSurface() {
         hasSurface = false
         attachedSurface = nil
+    }
+
+    func terminalDidResize(columns _: Int, rows _: Int) {
+        actionHandler(.userInput(id, .interaction))
     }
 
     func terminalDidChangeTitle(_ title: String) {

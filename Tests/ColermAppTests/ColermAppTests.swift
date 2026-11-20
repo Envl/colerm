@@ -1922,6 +1922,330 @@ final class ColermAppTests: XCTestCase {
             "Expected live GhosttySession viewport snapshot to read rendered output, got \(String(describing: lastSnapshot)) isRunning=\(session.isRunning) pid=\(String(describing: session.foregroundPID))"
         )
     }
+
+    @MainActor
+    func testGhosttySessionReadsActiveScreenUnaffectedByScrollbackPosition() async throws {
+        let runtime = GhosttyRuntime()
+        runtime.start()
+
+        let session = runtime.createSession(
+            options: SessionLaunchOptions(
+                command: "/bin/sh -c 'i=1; while [ $i -le 60 ]; do echo \"HIST_LINE_$i esc to interrupt\"; i=$((i+1)); done; echo ACTIVE_BOTTOM_OK; sleep 3'"
+            )
+        )
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 640, height: 240),
+            styleMask: [.titled, .resizable],
+            backing: .buffered,
+            defer: false
+        )
+        window.isReleasedWhenClosed = false
+        defer {
+            runtime.destroySession(session)
+            runtime.stop()
+            window.orderOut(nil)
+        }
+
+        session.view.frame = NSRect(x: 0, y: 0, width: 640, height: 240)
+        window.contentView = session.view
+        window.layoutIfNeeded()
+        session.view.layoutSubtreeIfNeeded()
+
+        var bottomSnapshot: TerminalViewportSnapshot?
+        for _ in 0 ..< 50 {
+            if let snapshot = session.pollViewportSnapshot(readText: true),
+               snapshot.tailLines.contains(where: { $0.contains("ACTIVE_BOTTOM_OK") }) {
+                bottomSnapshot = snapshot
+                break
+            }
+            try await Task.sleep(nanoseconds: 50_000_000)
+        }
+
+        let initialSnapshot = try XCTUnwrap(bottomSnapshot)
+
+        // Scroll viewport all the way up into scrollback history
+        _ = session.terminalView.performBindingAction("scroll_to_top")
+        try await Task.sleep(nanoseconds: 100_000_000)
+
+        let afterScrollSnapshot = try XCTUnwrap(session.pollViewportSnapshot(readText: true))
+        XCTAssertTrue(
+            afterScrollSnapshot.tailLines.contains(where: { $0.contains("ACTIVE_BOTTOM_OK") }),
+            "Expected GHOSTTY_POINT_ACTIVE snapshot to remain on active screen after scrolling up, got \(afterScrollSnapshot.tailLines)"
+        )
+        XCTAssertEqual(
+            afterScrollSnapshot.contentHash,
+            initialSnapshot.contentHash,
+            "Scrolling Ghostty scrollback must not change the active-screen contentHash"
+        )
+    }
+
+    func testManualScrollingAndBareScreenChangesInFinishedSessionNeverTriggerRunning() {
+        var tracker = AgentActivityTracker()
+        let obs = AgentProcessObservation(
+            agent: .claudeCode,
+            rootPID: 1200,
+            startsWorkingImmediately: false,
+            totalCPUNanoseconds: 100_000_000,
+            nonAgentChildren: []
+        )
+        let idleScreen = TerminalViewportSnapshot.from(lines: [
+            "Finished refactoring the store.",
+            "> Try \"refactor WorkspaceStore\"",
+            "? for shortcuts"
+        ])
+
+        _ = tracker.poll(observation: obs, viewport: idleScreen, isTabSelected: true, now: 100.0)
+        XCTAssertEqual(tracker.status, AgentSessionStatus(agent: .claudeCode, phase: .idle))
+
+        // 1. User scrolls inside a mouse-captured TUI past historical output — including old
+        //    "esc to interrupt" banners and old permission dialogs — must remain `.idle`.
+        let scrolledFrames: [TerminalViewportSnapshot] = [
+            TerminalViewportSnapshot.from(lines: ["Earlier output line 1", "Earlier output line 2"]),
+            TerminalViewportSnapshot.from(lines: ["Earlier tool output", "Working... (esc to interrupt)"]),
+            TerminalViewportSnapshot.from(lines: [
+                "Do you want to proceed?",
+                "❯ 1. Yes",
+                "  2. Always allow",
+                "Esc to cancel"
+            ]),
+            TerminalViewportSnapshot.from(lines: ["Older transcript block A", "Older transcript block B"]),
+            TerminalViewportSnapshot.from(lines: ["Older transcript block C", "Older transcript block D"]),
+            TerminalViewportSnapshot.from(lines: ["Older transcript block E", "Older transcript block F"])
+        ]
+
+        var timestamp = 110.0
+        for frame in scrolledFrames {
+            _ = tracker.handleUserInput(.interaction, now: timestamp)
+            _ = tracker.poll(observation: obs, viewport: frame, isTabSelected: true, now: timestamp + 0.5)
+            XCTAssertEqual(
+                tracker.status,
+                AgentSessionStatus(agent: .claudeCode, phase: .idle),
+                "Scrolling a finished session must never report Running or Blocked"
+            )
+            timestamp += 0.5
+        }
+
+        // 2. Even without interaction events (e.g. a TUI statusline clock or resize reflow),
+        //    bare novel screen diffs without a positive work signal must NOT promote idle -> running.
+        for step in 0 ..< 8 {
+            let tickTime = timestamp + 5.0 + Double(step) * 0.5
+            let frame = TerminalViewportSnapshot.from(lines: [
+                "Idle transcript frame \(step)",
+                "? for shortcuts   12:0\(step)"
+            ])
+            _ = tracker.poll(observation: obs, viewport: frame, isTabSelected: true, now: tickTime)
+            XCTAssertEqual(tracker.status, AgentSessionStatus(agent: .claudeCode, phase: .idle))
+        }
+    }
+
+    func testAuthoritativeHooksDriveDeterministicLifecycleAndResistTimeoutsAndScrolling() {
+        var tracker = AgentActivityTracker()
+        let claudeObs = AgentProcessObservation(
+            agent: .claudeCode,
+            rootPID: 2300,
+            startsWorkingImmediately: false,
+            totalCPUNanoseconds: 120_000_000,
+            nonAgentChildren: []
+        )
+        let idleScreen = TerminalViewportSnapshot.from(lines: [
+            ">",
+            "? for shortcuts"
+        ])
+
+        _ = tracker.poll(observation: claudeObs, viewport: idleScreen, isTabSelected: false, now: 100.0)
+        XCTAssertEqual(tracker.status, AgentSessionStatus(agent: .claudeCode, phase: .idle))
+
+        // Authoritative hook: UserPromptSubmit -> Running
+        _ = tracker.handleExplicitHint(
+            "state=working:app=claude-code:auth=1",
+            isTabSelected: false,
+            now: 110.0
+        )
+        XCTAssertEqual(tracker.status, AgentSessionStatus(agent: .claudeCode, phase: .running))
+
+        // Long silent 30-second LLM thinking wait with unchanged screen must STAY Running
+        // (never prematurely settle to Done after passiveSettleInterval).
+        _ = tracker.poll(observation: claudeObs, viewport: idleScreen, isTabSelected: false, now: 120.0)
+        _ = tracker.poll(observation: claudeObs, viewport: idleScreen, isTabSelected: false, now: 140.0)
+        XCTAssertEqual(tracker.status, AgentSessionStatus(agent: .claudeCode, phase: .running))
+
+        // Authoritative PermissionRequest -> Approve
+        _ = tracker.handleExplicitHint(
+            "state=blocked:kind=permission:app=claude-code:auth=1",
+            isTabSelected: false,
+            now: 141.0
+        )
+        XCTAssertEqual(
+            tracker.status,
+            AgentSessionStatus(agent: .claudeCode, phase: .needsInput(.permission))
+        )
+
+        // Approving via Enter immediately resumes Running (even before PostToolUse returns)
+        _ = tracker.handleUserInput(.submit, now: 145.0)
+        XCTAssertEqual(tracker.status, AgentSessionStatus(agent: .claudeCode, phase: .running))
+
+        // Authoritative Stop on background tab -> Done
+        _ = tracker.handleExplicitHint(
+            "state=done:app=claude-code:auth=1",
+            isTabSelected: false,
+            now: 155.0
+        )
+        XCTAssertEqual(tracker.status, AgentSessionStatus(agent: .claudeCode, phase: .done))
+
+        // Selecting tab clears Done -> Idle; empty Enter, title spinners, or scrolling must NOT flip Running
+        XCTAssertTrue(tracker.clearCompletedStatus())
+        XCTAssertEqual(tracker.status, AgentSessionStatus(agent: .claudeCode, phase: .idle))
+
+        _ = tracker.handleUserInput(.submit, now: 160.0)
+        _ = tracker.handleTitleChange("⠋ Stale", isTabSelected: true, now: 160.2)
+        _ = tracker.handleTitleChange("⠙ Stale", isTabSelected: true, now: 160.4)
+        _ = tracker.handleTitleChange("⠹ Stale", isTabSelected: true, now: 160.6)
+        let busyScrollbackFrame = TerminalViewportSnapshot.from(lines: [
+            "Old working line (esc to interrupt)"
+        ])
+        _ = tracker.poll(observation: claudeObs, viewport: busyScrollbackFrame, isTabSelected: true, now: 161.0)
+        XCTAssertEqual(tracker.status, AgentSessionStatus(agent: .claudeCode, phase: .idle))
+
+        // Esc interrupt safety net: if UserPromptSubmit runs and user presses Esc without Stop firing,
+        // seeing the idle composer after passiveSettleInterval recovers cleanly to `.idle`.
+        _ = tracker.handleExplicitHint(
+            "state=working:app=claude-code:auth=1",
+            isTabSelected: true,
+            now: 170.0
+        )
+        XCTAssertEqual(tracker.status, AgentSessionStatus(agent: .claudeCode, phase: .running))
+        _ = tracker.handleUserInput(.interrupt, now: 171.0)
+        _ = tracker.poll(observation: claudeObs, viewport: idleScreen, isTabSelected: true, now: 173.5)
+        XCTAssertEqual(tracker.status, AgentSessionStatus(agent: .claudeCode, phase: .idle))
+    }
+
+    @MainActor
+    func testCommandMatcherAndNavigationKeysAndHintParserAuthFlag() throws {
+        // Wrapper-injected `-c notify=...` before `exec` still detects Codex immediate work
+        XCTAssertEqual(
+            AgentCommandMatcher.match(
+                executablePath: "/usr/local/bin/codex",
+                arguments: ["codex", "-c", "notify=[\"/tmp/hook\",\"codex\",\"notify\"]", "exec", "fix tests"]
+            ),
+            AgentCommandMatch(agent: .codex, startsWorkingImmediately: true)
+        )
+        XCTAssertEqual(
+            AgentCommandMatcher.match(
+                executablePath: "/usr/local/bin/claude",
+                arguments: ["claude", "--settings", "/tmp/colerm-claude-hooks.json"]
+            ),
+            AgentCommandMatch(agent: .claudeCode, startsWorkingImmediately: false)
+        )
+
+        // Authoritative flag parsed from Rex-style key-value hint
+        let authHint = AgentStatusHintParser.parse("state=working:app=claude-code:auth=1")
+        XCTAssertEqual(
+            authHint,
+            ParsedAgentStatusHint(action: .running, agent: .claudeCode, authoritative: true)
+        )
+        let nonAuthHint = AgentStatusHintParser.parse("state=done:app=codex")
+        XCTAssertEqual(
+            nonAuthHint,
+            ParsedAgentStatusHint(action: .done, agent: .codex, authoritative: false)
+        )
+
+        // PageUp / PageDown classify as `.interaction` rather than `.typing`
+        let pageUp = try XCTUnwrap(NSEvent.keyEvent(
+            with: .keyDown,
+            location: .zero,
+            modifierFlags: [],
+            timestamp: 0,
+            windowNumber: 0,
+            context: nil,
+            characters: "\u{F72C}",
+            charactersIgnoringModifiers: "\u{F72C}",
+            isARepeat: false,
+            keyCode: UInt16(kVK_PageUp)
+        ))
+        XCTAssertEqual(TerminalSurfaceView.classifyKeyInput(pageUp), .interaction)
+    }
+
+    @MainActor
+    func testAgentStatusEventChannelReceivesHookScriptEventsAndValidatesBundledHooksJSON() async throws {
+        // 1. Validate bundled Claude hooks JSON parses cleanly
+        let rootURL = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let hooksJSONURL = rootURL.appendingPathComponent(
+            "Resources/shell-integration/zsh/colerm-claude-hooks.json"
+        )
+        let hookScriptURL = rootURL.appendingPathComponent(
+            "Resources/shell-integration/zsh/colerm-agent-hook.sh"
+        )
+        let jsonData = try Data(contentsOf: hooksJSONURL)
+        let parsedJSON = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: jsonData) as? [String: Any]
+        )
+        let hooksDict = try XCTUnwrap(parsedJSON["hooks"] as? [String: Any])
+        XCTAssertNotNil(hooksDict["UserPromptSubmit"])
+        XCTAssertNotNil(hooksDict["PreToolUse"])
+        XCTAssertNotNil(hooksDict["PostToolUse"])
+        XCTAssertNotNil(hooksDict["PermissionRequest"])
+        XCTAssertNotNil(hooksDict["Notification"])
+        XCTAssertNotNil(hooksDict["Stop"])
+        XCTAssertNotNil(hooksDict["SessionEnd"])
+
+        // 2. Start live event channel and invoke `colerm-agent-hook.sh` end-to-end
+        let expectedSessionID = UUID()
+        var receivedEvents: [(TerminalSessionID, String)] = []
+        let statusDir = "/tmp/colerm-test-\(String(UUID().uuidString.prefix(8)).lowercased())"
+        let channel = try XCTUnwrap(
+            AgentStatusEventChannel(directoryPath: statusDir) { sessionID, hint in
+                receivedEvents.append((sessionID, hint))
+            }
+        )
+        defer { channel.stop() }
+
+        let runHook: ([String], String?) throws -> Void = { args, stdinText in
+            let proc = Process()
+            proc.executableURL = URL(fileURLWithPath: "/bin/sh")
+            proc.arguments = [hookScriptURL.path] + args
+            proc.environment = [
+                "PATH": "/usr/bin:/bin",
+                "COLERM_STATUS_DIR": channel.directoryPath,
+                "COLERM_SESSION_ID": expectedSessionID.uuidString
+            ]
+            if let stdinText {
+                let pipe = Pipe()
+                proc.standardInput = pipe
+                try proc.run()
+                pipe.fileHandleForWriting.write(Data(stdinText.utf8))
+                try pipe.fileHandleForWriting.close()
+            } else {
+                proc.standardInput = FileHandle.nullDevice
+                try proc.run()
+            }
+            proc.waitUntilExit()
+            XCTAssertEqual(proc.terminationStatus, 0)
+        }
+
+        try runHook(["claude", "UserPromptSubmit"], nil)
+        try runHook(["claude", "PreToolUse"], "{\"tool_name\":\"AskUserQuestion\"}")
+        try runHook(["claude", "Stop"], nil)
+        try runHook(["codex", "notify", "{\"type\":\"agent-turn-complete\"}"], nil)
+
+        for _ in 0 ..< 40 where receivedEvents.count < 4 {
+            try await Task.sleep(nanoseconds: 25_000_000)
+        }
+
+        XCTAssertEqual(receivedEvents.count, 4)
+        guard receivedEvents.count == 4 else { return }
+        XCTAssertEqual(receivedEvents[0].0, expectedSessionID)
+        XCTAssertEqual(receivedEvents[0].1, "state=working:app=claude-code:auth=1")
+        XCTAssertEqual(receivedEvents[1].1, "state=blocked:kind=question:app=claude-code:auth=1")
+        XCTAssertEqual(receivedEvents[2].1, "state=done:app=claude-code:auth=1")
+        XCTAssertEqual(receivedEvents[3].1, "state=done:app=codex")
+
+        // Stopping the channel removes the temp directory so future hook calls become no-ops
+        channel.stop()
+        XCTAssertFalse(FileManager.default.fileExists(atPath: statusDir))
+    }
 }
 
 @MainActor

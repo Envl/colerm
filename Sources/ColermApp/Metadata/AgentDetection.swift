@@ -351,32 +351,59 @@ enum AgentCommandMatcher {
         for agent: AgentKind,
         arguments: [String]
     ) -> Bool {
-        guard let first = arguments.first else { return false }
+        guard !arguments.isEmpty else { return false }
+        let firstPositional = firstPositionalSubcommand(in: arguments)
 
         switch agent {
         case .claudeCode:
             return arguments.contains("-p") || arguments.contains("--print")
         case .codex:
-            return first == "exec" || first == "e"
+            return firstPositional == "exec" || firstPositional == "e"
                 || arguments.contains("-q") || arguments.contains("--quiet")
         case .pi:
             return arguments.contains("-p") || arguments.contains("--print")
         case .opencode:
-            return first == "run"
+            return firstPositional == "run"
                 || arguments.contains("-p") || arguments.contains("--prompt")
         case .grok:
             return arguments.contains("-p")
                 || arguments.contains("--prompt")
                 || arguments.contains("--print")
         case .factoryDroid:
-            return first == "exec"
+            return firstPositional == "exec"
                 || arguments.contains("-p") || arguments.contains("--prompt")
         case .agy:
-            return first == "exec" || first == "run"
+            return firstPositional == "exec" || firstPositional == "run"
                 || arguments.contains("-p")
                 || arguments.contains("--prompt")
                 || arguments.contains("--print")
         }
+    }
+
+    private static func firstPositionalSubcommand(in arguments: [String]) -> String? {
+        let flagsTakingValue: Set<String> = [
+            "-c", "--config", "--settings", "-m", "--model", "-p", "--profile",
+            "-s", "--sandbox", "-a", "--ask-for-approval", "-C", "--cd",
+            "--add-dir", "--agent", "--mode", "--effort", "--project",
+            "--enable", "--disable"
+        ]
+        var index = 0
+        while index < arguments.count {
+            let token = arguments[index]
+            if token == "--" {
+                return index + 1 < arguments.count ? arguments[index + 1] : nil
+            }
+            if token.hasPrefix("-"), token.count > 1 {
+                if !token.contains("="), flagsTakingValue.contains(token) {
+                    index += 2
+                } else {
+                    index += 1
+                }
+                continue
+            }
+            return token
+        }
+        return nil
     }
 
     private static func advancePastWrapperFlags(
@@ -655,6 +682,7 @@ enum AgentStatusHintAction: Equatable, Sendable {
 struct ParsedAgentStatusHint: Equatable, Sendable {
     var action: AgentStatusHintAction
     var agent: AgentKind?
+    var authoritative: Bool = false
 }
 
 enum AgentStatusHintParser {
@@ -687,6 +715,8 @@ enum AgentStatusHintParser {
         }
 
         let agent = (fields["app"] ?? fields["agent"]).flatMap(AgentCommandMatcher.identifyAgentName)
+        let rawAuth = (fields["auth"] ?? fields["authoritative"])?.lowercased()
+        let authoritative = rawAuth == "1" || rawAuth == "true" || rawAuth == "yes"
         let action: AgentStatusHintAction
         switch rawState {
         case "working", "running", "start":
@@ -702,7 +732,11 @@ enum AgentStatusHintParser {
             return nil
         }
 
-        return ParsedAgentStatusHint(action: action, agent: agent)
+        return ParsedAgentStatusHint(
+            action: action,
+            agent: agent,
+            authoritative: authoritative
+        )
     }
 
     private static func parsePositionalHint(_ raw: String) -> ParsedAgentStatusHint? {
@@ -974,6 +1008,7 @@ struct AgentActivityTracker {
     static let passiveSettleInterval: TimeInterval = 2.0
     static let hintedSettleInterval: TimeInterval = 0.6
     static let blockedSettleInterval: TimeInterval = 0.5
+    static let interactionCooldownInterval: TimeInterval = 1.2
     static let unconfirmedEmptySubmitTimeout: TimeInterval = 1.5
     static let unconfirmedPromptSubmitTimeout: TimeInterval = 3.0
     static let transientToolSilenceLimit: TimeInterval = 8.0
@@ -989,12 +1024,16 @@ struct AgentActivityTracker {
     private var isAgentProcessAlive = false
     private var isHeadlessRun = false
     private var isExplicitlyBlocked = false
+    private var hasAuthoritativeHooks = false
+    private var interruptedWhileAuthoritative = false
     private var agentDetectedAt: TimeInterval = 0
     private var lastWorkSignalAt: TimeInterval = 0
     private var lastNovelScreenOrStartAt: TimeInterval = 0
     private var lastCompletionHintAt: TimeInterval?
     private var lastUserTypingAt: TimeInterval?
     private var lastUserSubmitAt: TimeInterval?
+    private var lastUserInteractionAt: TimeInterval?
+    private var lastInterruptAt: TimeInterval?
     private var hadTypedInputBeforeSubmit = false
     private var pollsSinceSubmit = 0
 
@@ -1062,11 +1101,15 @@ struct AgentActivityTracker {
             isAgentProcessAlive = false
             isHeadlessRun = false
             isExplicitlyBlocked = false
+            hasAuthoritativeHooks = false
+            interruptedWhileAuthoritative = false
             resetLiveMetrics()
         } else if current.phase == .done, !isTabSelected {
             isAgentProcessAlive = false
             isHeadlessRun = false
             isExplicitlyBlocked = false
+            hasAuthoritativeHooks = false
+            interruptedWhileAuthoritative = false
             resetLiveMetrics()
         } else {
             resetAll()
@@ -1085,12 +1128,17 @@ struct AgentActivityTracker {
         case .typing:
             lastUserTypingAt = now
 
+        case .interaction:
+            lastUserInteractionAt = now
+
         case .interrupt:
             lastUserTypingAt = nil
             lastCompletionHintAt = now
+            lastInterruptAt = now
             if let current = status {
                 if current.phase.isBlocked {
                     isExplicitlyBlocked = false
+                    interruptedWhileAuthoritative = false
                     dismissedBlockedViewportHash = lastObservedViewportHash
                     turnConfirmed = false
                     hadTypedInputBeforeSubmit = false
@@ -1098,9 +1146,13 @@ struct AgentActivityTracker {
                     status = isAgentProcessAlive
                         ? AgentSessionStatus(agent: current.agent, phase: .idle)
                         : nil
-                } else if current.phase == .running, !turnConfirmed {
-                    status = AgentSessionStatus(agent: current.agent, phase: .idle)
-                    hadTypedInputBeforeSubmit = false
+                } else if current.phase == .running {
+                    if hasAuthoritativeHooks {
+                        interruptedWhileAuthoritative = true
+                    } else if !turnConfirmed {
+                        status = AgentSessionStatus(agent: current.agent, phase: .idle)
+                        hadTypedInputBeforeSubmit = false
+                    }
                 }
             }
 
@@ -1115,6 +1167,22 @@ struct AgentActivityTracker {
             let wasAnsweringBlockedPrompt = current.phase.isBlocked
             isExplicitlyBlocked = false
             dismissedBlockedViewportHash = nil
+            if hasAuthoritativeHooks {
+                // In authoritative hook mode, `UserPromptSubmit` drives idle -> running so empty
+                // Return or slash menus never flash Running. When answering a blocked prompt
+                // (e.g. approving a slow Bash tool), transition immediately to Running until
+                // PostToolUse / Stop arrives.
+                if wasAnsweringBlockedPrompt {
+                    interruptedWhileAuthoritative = false
+                    status = AgentSessionStatus(agent: current.agent, phase: .running)
+                    turnConfirmed = true
+                    consecutiveWorkTicks = 0
+                    lastWorkSignalAt = now
+                    lastNovelScreenOrStartAt = now
+                    lastCompletionHintAt = nil
+                }
+                break
+            }
             if current.phase != .running {
                 status = AgentSessionStatus(agent: current.agent, phase: .running)
                 turnConfirmed = false
@@ -1143,6 +1211,10 @@ struct AgentActivityTracker {
         guard title != lastTitle else { return false }
         let previous = status
         lastTitle = title
+
+        if hasAuthoritativeHooks {
+            return false
+        }
 
         let newFrame = AgentTitleSpinnerDetector.leadingSpinnerFrame(in: title)
         let hadPreviousSpinner = lastSpinnerFrame != nil
@@ -1190,6 +1262,10 @@ struct AgentActivityTracker {
         isTabSelected: Bool,
         now: TimeInterval
     ) -> Bool {
+        if hasAuthoritativeHooks {
+            isProgressActive = (progress == .active)
+            return false
+        }
         let previous = status
         let inBootWindow = (now - agentDetectedAt) < Self.startupBootWindow
 
@@ -1295,6 +1371,11 @@ struct AgentActivityTracker {
             return false
         }
 
+        if parsed.authoritative {
+            hasAuthoritativeHooks = true
+            interruptedWhileAuthoritative = false
+        }
+
         switch parsed.action {
         case .running:
             isAgentProcessAlive = true
@@ -1322,6 +1403,9 @@ struct AgentActivityTracker {
         case .idle:
             isExplicitlyBlocked = false
             status = isAgentProcessAlive ? AgentSessionStatus(agent: agent, phase: .idle) : nil
+            if !isAgentProcessAlive {
+                hasAuthoritativeHooks = false
+            }
             turnConfirmed = false
             consecutiveWorkTicks = 0
         }
@@ -1365,6 +1449,9 @@ struct AgentActivityTracker {
             || (activeRootPID != nil && activeRootPID != observation.rootPID)
 
         if isNewProcess {
+            let preserveAuthoritativeHooks = status?.agent == observation.agent
+                && activeRootPID == nil
+                && hasAuthoritativeHooks
             let preserveRunningFromPreexec = status?.agent == observation.agent
                 && activeRootPID == nil
                 && status?.phase == .running
@@ -1385,6 +1472,9 @@ struct AgentActivityTracker {
                 startsWorkingImmediately: observation.startsWorkingImmediately || (preserveRunningFromPreexec && isHeadlessRun),
                 now: now
             )
+            if preserveAuthoritativeHooks {
+                hasAuthoritativeHooks = true
+            }
             if let preservedBlockedPhase {
                 isExplicitlyBlocked = true
                 status = AgentSessionStatus(agent: observation.agent, phase: preservedBlockedPhase)
@@ -1418,6 +1508,8 @@ struct AgentActivityTracker {
 
         let inBootWindow = (now - agentDetectedAt) < Self.startupBootWindow
         let isRecentTypingWindow = lastUserTypingAt.map { (now - $0) < 0.7 } ?? false
+        let isRecentInteractionWindow = lastUserInteractionAt.map { (now - $0) < Self.interactionCooldownInterval } ?? false
+        let suppressViewportDiff = isRecentTypingWindow || isRecentInteractionWindow
         let hasUnsubmittedTyping = lastUserTypingAt.map { typingAt in
             (lastUserSubmitAt ?? 0) < typingAt && (now - typingAt) < 10.0
         } ?? false
@@ -1425,7 +1517,7 @@ struct AgentActivityTracker {
             pollsSinceSubmit += 1
         }
 
-        // 1. Evaluate viewport text changes & interactive prompts (immune to cursor blink & color shimmers)
+        // 1. Evaluate active-screen text changes & interactive prompts (immune to cursor blink & scrollback)
         var autonomousNovelViewportChange = false
         var hasExplicitBusyBanner = false
         var detectedBlockedKind: AgentBlockedKind?
@@ -1448,7 +1540,7 @@ struct AgentActivityTracker {
             let ignoreEmptySubmitEcho = !hadTypedInputBeforeSubmit
                 && (lastUserSubmitAt != nil)
                 && (pollsSinceSubmit == 1)
-            if isNovel && !isRecentTypingWindow && (!ignoreEmptySubmitEcho || hasExplicitBusyBanner || detectedBlockedKind != nil) {
+            if isNovel && !suppressViewportDiff && (!ignoreEmptySubmitEcho || hasExplicitBusyBanner || detectedBlockedKind != nil) {
                 autonomousNovelViewportChange = true
                 lastNovelScreenOrStartAt = now
             }
@@ -1516,14 +1608,38 @@ struct AgentActivityTracker {
 
         guard let current = status else { return false }
 
+        if hasAuthoritativeHooks {
+            switch current.phase {
+            case .idle, .done:
+                if isTabSelected, current.phase == .done {
+                    status = AgentSessionStatus(agent: current.agent, phase: .idle)
+                }
+            case .needsInput:
+                break
+            case .running:
+                if interruptedWhileAuthoritative,
+                   let interruptedAt = lastInterruptAt,
+                   (now - interruptedAt) >= Self.passiveSettleInterval,
+                   hasIdleComposerFooter,
+                   !hasExplicitBusyBanner,
+                   !hasActiveTransientToolChild {
+                    interruptedWhileAuthoritative = false
+                    turnConfirmed = false
+                    status = AgentSessionStatus(agent: current.agent, phase: .idle)
+                }
+            }
+            return status != previous
+        }
+
         switch current.phase {
         case .idle, .done:
             if isTabSelected, current.phase == .done {
                 status = AgentSessionStatus(agent: current.agent, phase: .idle)
             }
 
-            // Before user submits a prompt, ignore boot noise (MCP checks, update banners).
-            if hasExplicitBusyBanner && autonomousNovelViewportChange {
+            // Entering `.running` from idle/done requires a positive work signal — never bare
+            // screen diffs alone (which false-trigger on TUI scrolling, resizing, or status ticks).
+            if hasExplicitBusyBanner && autonomousNovelViewportChange && !isRecentInteractionWindow {
                 status = AgentSessionStatus(agent: current.agent, phase: .running)
                 turnConfirmed = true
                 lastWorkSignalAt = now
@@ -1532,6 +1648,7 @@ struct AgentActivityTracker {
             } else if let blockedKind = detectedBlockedKind,
                       !hasUnsubmittedTyping,
                       !isRecentTypingWindow,
+                      !isRecentInteractionWindow,
                       !autonomousNovelViewportChange,
                       !hasActiveTransientToolChild,
                       !hasRecentTitleSpinner {
@@ -1540,9 +1657,9 @@ struct AgentActivityTracker {
                 consecutiveWorkTicks = 0
                 lastCompletionHintAt = nil
                 status = AgentSessionStatus(agent: current.agent, phase: .needsInput(blockedKind))
-            } else if !inBootWindow, (autonomousNovelViewportChange || hasRecentTitleSpinner || fallbackCPUWork) {
+            } else if !inBootWindow, (hasRecentTitleSpinner || hasActiveTransientToolChild || fallbackCPUWork) {
                 consecutiveWorkTicks += 1
-                let requiredTicks = hasRecentTitleSpinner ? 2 : 4
+                let requiredTicks = hasActiveTransientToolChild ? 1 : (hasRecentTitleSpinner ? 2 : 4)
                 if consecutiveWorkTicks >= requiredTicks {
                     status = AgentSessionStatus(agent: current.agent, phase: .running)
                     turnConfirmed = true
@@ -1554,7 +1671,7 @@ struct AgentActivityTracker {
             }
 
         case .needsInput(let currentKind):
-            if hasActiveTransientToolChild || hasRecentTitleSpinner || hasFreshProgress || hasFreshBusyBanner {
+            if hasActiveTransientToolChild || hasRecentTitleSpinner || hasFreshProgress || (hasFreshBusyBanner && !isRecentInteractionWindow) {
                 isExplicitlyBlocked = false
                 status = AgentSessionStatus(agent: current.agent, phase: .running)
                 turnConfirmed = true
@@ -1565,7 +1682,7 @@ struct AgentActivityTracker {
                 if !isExplicitlyBlocked, blockedKind != currentKind {
                     status = AgentSessionStatus(agent: current.agent, phase: .needsInput(blockedKind))
                 }
-            } else if viewport != nil, !isExplicitlyBlocked {
+            } else if viewport != nil, !isExplicitlyBlocked, !isRecentInteractionWindow {
                 // Interactive prompt disappeared from the viewport (e.g. single-key y/n or mouse click).
                 if hasIdleComposerFooter && !autonomousNovelViewportChange {
                     status = AgentSessionStatus(agent: current.agent, phase: .idle)
@@ -1643,10 +1760,13 @@ struct AgentActivityTracker {
         isAgentProcessAlive = true
         isHeadlessRun = startsWorkingImmediately
         isExplicitlyBlocked = false
+        hasAuthoritativeHooks = false
+        interruptedWhileAuthoritative = false
         agentDetectedAt = now
         lastWorkSignalAt = now
         lastNovelScreenOrStartAt = now
         lastCompletionHintAt = nil
+        lastInterruptAt = nil
         hadTypedInputBeforeSubmit = false
         pollsSinceSubmit = 0
         consecutiveWorkTicks = 0
@@ -1662,6 +1782,7 @@ struct AgentActivityTracker {
         turnConfirmed = false
         isHeadlessRun = false
         isExplicitlyBlocked = false
+        interruptedWhileAuthoritative = false
         hadTypedInputBeforeSubmit = false
         consecutiveWorkTicks = 0
         lastCompletionHintAt = nil
@@ -1681,11 +1802,15 @@ struct AgentActivityTracker {
             isAgentProcessAlive = false
             isHeadlessRun = false
             isExplicitlyBlocked = false
+            hasAuthoritativeHooks = false
+            interruptedWhileAuthoritative = false
             resetLiveMetrics()
         } else if current.phase == .done, !isTabSelected {
             isAgentProcessAlive = false
             isHeadlessRun = false
             isExplicitlyBlocked = false
+            hasAuthoritativeHooks = false
+            interruptedWhileAuthoritative = false
             resetLiveMetrics()
         } else {
             resetAll()
@@ -1713,6 +1838,8 @@ struct AgentActivityTracker {
         isAgentProcessAlive = false
         isHeadlessRun = false
         isExplicitlyBlocked = false
+        hasAuthoritativeHooks = false
+        interruptedWhileAuthoritative = false
         turnConfirmed = false
         hadTypedInputBeforeSubmit = false
         pollsSinceSubmit = 0
@@ -1720,6 +1847,8 @@ struct AgentActivityTracker {
         lastCompletionHintAt = nil
         lastUserTypingAt = nil
         lastUserSubmitAt = nil
+        lastUserInteractionAt = nil
+        lastInterruptAt = nil
         resetLiveMetrics()
     }
 }

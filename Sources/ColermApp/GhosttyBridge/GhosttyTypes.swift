@@ -37,6 +37,7 @@ enum TerminalUserInputKind: Equatable, Sendable {
     case submit
     case typing
     case interrupt
+    case interaction
 }
 
 enum GhosttyProgressState: Equatable, Sendable {

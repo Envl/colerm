@@ -1,0 +1,77 @@
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$COLERM_AGENT_HOOK\" claude UserPromptSubmit"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$COLERM_AGENT_HOOK\" claude PreToolUse"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$COLERM_AGENT_HOOK\" claude PostToolUse"
+          }
+        ]
+      }
+    ],
+    "PermissionRequest": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$COLERM_AGENT_HOOK\" claude PermissionRequest"
+          }
+        ]
+      }
+    ],
+    "Notification": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$COLERM_AGENT_HOOK\" claude Notification"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$COLERM_AGENT_HOOK\" claude Stop"
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$COLERM_AGENT_HOOK\" claude SessionEnd"
+          }
+        ]
+      }
+    ]
+  }
+}
