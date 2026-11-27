@@ -13,7 +13,7 @@ are running, need input or approval, or have finished.
 ## Workspace
 
 - **Git branches and diffs** — Switch branches from the terminal header. Click the change count to review uncommitted changes in a resizable pane. Choose unified or split view, search with `⌘F`, and keep file titles in view while scrolling.
-- **Coding agent status** — Tabs show when a detected agent is running, needs input or approval, or has finished. Colerm detects Claude Code, Codex, Pi, OpenCode, Grok, Factory Droid, and Antigravity.
+- **Coding agent status** — Tabs show the detected agent's icon and whether it is running, needs input or approval, or has finished. Colerm detects Claude Code, Codex, Amp, Gemini CLI, Cursor CLI, GitHub Copilot CLI, Pi, OpenCode, Grok, Factory Droid, Antigravity, Qwen Code, Kimi CLI, Kiro CLI, and Muse Code.
 - **Columns and tabs** — Resize terminal columns, drag tabs to reorder them, or enable **Vertical Tabs** in Settings for a resizable sidebar.
 - **Terminal navigation** — Press `⌘P` to find an open terminal, `⌘1` through `⌘9` to select by position, or `⌃Tab` and `⌃⇧Tab` to cycle. Change the palette and cycling shortcuts in Settings (`⌘,`).
 - **Running commands** — See which terminals are busy and jump to a running command from the workspace footer.

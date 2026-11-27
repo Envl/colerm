@@ -225,15 +225,23 @@ private struct WorkspaceTab: View {
     var body: some View {
         ZStack(alignment: .trailing) {
             HStack(spacing: 8) {
-                Circle()
-                    .fill(accent)
-                    .frame(width: 6, height: 6)
-                    .saturation(isDotLit ? 1 : 0.3)
-                    .opacity(isDotLit ? 1 : 0.45)
-                    .shadow(
-                        color: isDotLit ? accent.opacity(0.8) : .clear,
-                        radius: isDotLit ? 5 : 0
-                    )
+                Group {
+                    if let agent = session.agentStatus?.agent {
+                        AgentIconView(agent: agent)
+                            .opacity(isDotLit ? 1 : 0.7)
+                    } else {
+                        Circle()
+                            .fill(accent)
+                            .frame(width: 6, height: 6)
+                            .saturation(isDotLit ? 1 : 0.3)
+                            .opacity(isDotLit ? 1 : 0.45)
+                            .shadow(
+                                color: isDotLit ? accent.opacity(0.8) : .clear,
+                                radius: isDotLit ? 5 : 0
+                            )
+                    }
+                }
+                .frame(width: 12, height: 12)
 
                 Text(projectFolderName)
                     .font(.system(size: 11, weight: .medium))

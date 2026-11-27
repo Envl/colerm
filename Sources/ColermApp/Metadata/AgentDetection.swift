@@ -8,6 +8,14 @@ enum AgentKind: String, CaseIterable, Equatable, Sendable {
     case grok
     case factoryDroid
     case agy
+    case amp
+    case gemini
+    case cursor
+    case copilot
+    case qwen
+    case kimi
+    case kiro
+    case muse
 
     var displayName: String {
         switch self {
@@ -25,6 +33,22 @@ enum AgentKind: String, CaseIterable, Equatable, Sendable {
             return "Factory Droid"
         case .agy:
             return "Antigravity"
+        case .amp:
+            return "Amp"
+        case .gemini:
+            return "Gemini CLI"
+        case .cursor:
+            return "Cursor CLI"
+        case .copilot:
+            return "GitHub Copilot CLI"
+        case .qwen:
+            return "Qwen Code"
+        case .kimi:
+            return "Kimi CLI"
+        case .kiro:
+            return "Kiro CLI"
+        case .muse:
+            return "Muse Code"
         }
     }
 
@@ -44,6 +68,22 @@ enum AgentKind: String, CaseIterable, Equatable, Sendable {
             return "Droid"
         case .agy:
             return "AGY"
+        case .amp:
+            return "Amp"
+        case .gemini:
+            return "Gemini"
+        case .cursor:
+            return "Cursor"
+        case .copilot:
+            return "Copilot"
+        case .qwen:
+            return "Qwen"
+        case .kimi:
+            return "Kimi"
+        case .kiro:
+            return "Kiro"
+        case .muse:
+            return "Muse"
         }
     }
 }
@@ -277,6 +317,14 @@ enum AgentCommandMatcher {
             return .factoryDroid
         case "antigravity", "agy", "antigravity-cli":
             return .agy
+        case "gemini-cli":
+            return .gemini
+        case "github-copilot", "copilot-cli":
+            return .copilot
+        case "qwen-code":
+            return .qwen
+        case "muse-code":
+            return .muse
         default:
             return identifyAgent(from: trimmed)
         }
@@ -303,8 +351,29 @@ enum AgentCommandMatcher {
             return .factoryDroid
         case "agy", "antigravity-cli":
             return .agy
+        case "amp":
+            return .amp
+        case "gemini":
+            return .gemini
+        case "cursor-agent":
+            return .cursor
+        case "copilot":
+            return .copilot
+        case "qwen":
+            return .qwen
+        case "kimi", "kimi-cli":
+            return .kimi
+        case "kiro-cli", "kiro-cli-chat":
+            return .kiro
+        case "muse":
+            return .muse
         default:
             break
+        }
+
+        // The `muse` launcher execs a versioned native binary such as `muse-bin-1.4.25-R9361.1`.
+        if base.hasPrefix("muse-bin-") {
+            return .muse
         }
 
         // 2. Package / installation path markers (e.g. node .../cli.js or npx @scope/pkg)
@@ -343,6 +412,29 @@ enum AgentCommandMatcher {
             || lowered.contains("@google/antigravity-cli") {
             return .agy
         }
+        if lowered.contains("@sourcegraph/amp")
+            || lowered.contains("@sourcegraph+amp")
+            || lowered.contains("/.amp/bin/") {
+            return .amp
+        }
+        if lowered.contains("@google/gemini-cli")
+            || lowered.contains("@google+gemini-cli") {
+            return .gemini
+        }
+        if lowered.contains("/cursor-agent/") {
+            return .cursor
+        }
+        if lowered.contains("@github/copilot")
+            || lowered.contains("@github+copilot") {
+            return .copilot
+        }
+        if lowered.contains("@qwen-code/qwen-code")
+            || lowered.contains("@qwen-code+qwen-code") {
+            return .qwen
+        }
+        if lowered.contains("/kimi-cli/") {
+            return .kimi
+        }
 
         return nil
     }
@@ -377,6 +469,18 @@ enum AgentCommandMatcher {
                 || arguments.contains("-p")
                 || arguments.contains("--prompt")
                 || arguments.contains("--print")
+        case .amp:
+            return arguments.contains("-x") || arguments.contains("--execute")
+        case .gemini, .copilot, .qwen:
+            return arguments.contains("-p") || arguments.contains("--prompt")
+        case .cursor:
+            return arguments.contains("-p") || arguments.contains("--print")
+        case .kimi:
+            return arguments.contains("--print")
+        case .kiro:
+            return arguments.contains("--no-interactive")
+        case .muse:
+            return firstPositional == "exec"
         }
     }
 

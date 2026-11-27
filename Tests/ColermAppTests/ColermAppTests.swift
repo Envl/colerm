@@ -1364,6 +1364,63 @@ final class ColermAppTests: XCTestCase {
             AgentCommandMatch(agent: .agy, startsWorkingImmediately: true)
         )
 
+        XCTAssertEqual(
+            AgentCommandMatcher.match(executablePath: "/Users/dev/.amp/bin/amp", arguments: ["amp", "-x", "fix lint"]),
+            AgentCommandMatch(agent: .amp, startsWorkingImmediately: true)
+        )
+        XCTAssertEqual(
+            AgentCommandMatcher.match(
+                executablePath: "/opt/homebrew/bin/node",
+                arguments: ["node", "/Users/dev/Library/pnpm/global/5/.pnpm/@google+gemini-cli@0.24.0/node_modules/@google/gemini-cli/dist/index.js"]
+            ),
+            AgentCommandMatch(agent: .gemini, startsWorkingImmediately: false)
+        )
+        // Cursor's `agent` wrapper re-execs its bundled node with `exec -a "$0"`.
+        XCTAssertEqual(
+            AgentCommandMatcher.match(
+                executablePath: "/Users/dev/.local/share/cursor-agent/versions/2026.08.11/node",
+                arguments: ["/Users/dev/.local/bin/agent", "--use-system-ca", "/Users/dev/.local/share/cursor-agent/versions/2026.08.11/index.js"]
+            ),
+            AgentCommandMatch(agent: .cursor, startsWorkingImmediately: false)
+        )
+        XCTAssertEqual(
+            AgentCommandMatcher.match(commandLine: "cursor-agent -p \"summarize\""),
+            AgentCommandMatch(agent: .cursor, startsWorkingImmediately: true)
+        )
+        XCTAssertEqual(
+            AgentCommandMatcher.match(
+                executablePath: "/opt/homebrew/bin/node",
+                arguments: ["node", "/Users/dev/Library/pnpm/global/5/.pnpm/@github+copilot@0.0.405/node_modules/@github/copilot/npm-loader.js"]
+            ),
+            AgentCommandMatch(agent: .copilot, startsWorkingImmediately: false)
+        )
+        XCTAssertEqual(
+            AgentCommandMatcher.match(commandLine: "qwen --prompt \"add tests\""),
+            AgentCommandMatch(agent: .qwen, startsWorkingImmediately: true)
+        )
+        XCTAssertEqual(
+            AgentCommandMatcher.match(
+                executablePath: "/Users/dev/.local/share/uv/tools/kimi-cli/bin/python",
+                arguments: ["python", "/Users/dev/.local/bin/kimi"]
+            ),
+            AgentCommandMatch(agent: .kimi, startsWorkingImmediately: false)
+        )
+        XCTAssertEqual(
+            AgentCommandMatcher.match(commandLine: "kiro-cli chat --no-interactive \"explain\""),
+            AgentCommandMatch(agent: .kiro, startsWorkingImmediately: true)
+        )
+        XCTAssertEqual(
+            AgentCommandMatcher.match(commandLine: "muse exec \"fix the build\""),
+            AgentCommandMatch(agent: .muse, startsWorkingImmediately: true)
+        )
+        XCTAssertEqual(
+            AgentCommandMatcher.match(
+                executablePath: "/Users/dev/.local/bin/muse-bin-1.4.25-R9361.1",
+                arguments: ["/Users/dev/.local/bin/muse-bin-1.4.25-R9361.1"]
+            ),
+            AgentCommandMatch(agent: .muse, startsWorkingImmediately: false)
+        )
+
         // Reject help/version probes and non-agent commands mentioning agent names in arguments
         XCTAssertNil(AgentCommandMatcher.match(commandLine: "claude --version"))
         XCTAssertNil(AgentCommandMatcher.match(commandLine: "agy --help"))
