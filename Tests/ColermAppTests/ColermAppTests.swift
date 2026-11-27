@@ -30,6 +30,54 @@ final class ColermAppTests: XCTestCase {
         XCTAssertEqual(repairedFrame.maxY, savedFrame.maxY)
     }
 
+    @MainActor
+    func testSwitchingTabOrientationPreservesWindowFrame() async throws {
+        let suiteName = "ColermAppTests.tabOrientation.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        let persistenceURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("\(suiteName).json")
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+            try? FileManager.default.removeItem(at: persistenceURL)
+        }
+
+        let settings = WorkspaceLayoutSettings(defaults: defaults)
+        settings.setVerticalTabsWidth(WorkspaceLayoutMetrics.maximumVerticalTabsWidth)
+        let controller = WorkspaceViewController(
+            store: WorkspaceStore(
+                persistence: WorkspacePersistence(fileURL: persistenceURL),
+                runtime: GhosttyRuntime(),
+                gitInspector: GitInspector()
+            ),
+            shortcutSettings: KeyboardShortcutSettings(defaults: defaults),
+            workspaceLayoutSettings: settings,
+            onOpenSettings: {}
+        )
+        let window = NSWindow(
+            contentRect: .zero,
+            styleMask: [.titled, .resizable],
+            backing: .buffered,
+            defer: false
+        )
+        window.isReleasedWhenClosed = false
+        defer { window.orderOut(nil) }
+        window.minSize = ColermWindowController.minimumWindowSize
+        window.contentViewController = controller
+
+        for size in [window.minSize, NSSize(width: 980, height: 640)] {
+            let frame = NSRect(origin: NSPoint(x: 100, y: 100), size: size)
+            window.setFrame(frame, display: false)
+            window.layoutIfNeeded()
+            for isVertical in [true, false] {
+                settings.setVerticalTabsEnabled(isVertical)
+                window.layoutIfNeeded()
+                await Task.yield()
+                window.layoutIfNeeded()
+                XCTAssertEqual(window.frame, frame, "Vertical tabs enabled: \(isVertical)")
+            }
+        }
+    }
+
     func testWorkspaceTabTitlePrefersCurrentFolderOverGitRoot() {
         let gitRoot = URL(fileURLWithPath: "/tmp/shell-click")
         let currentFolder = gitRoot.appendingPathComponent("website")

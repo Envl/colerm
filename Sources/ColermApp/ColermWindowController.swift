@@ -1,5 +1,4 @@
 import AppKit
-import Combine
 
 @MainActor
 final class ColermWindowController: NSWindowController, NSWindowDelegate {
@@ -15,7 +14,6 @@ final class ColermWindowController: NSWindowController, NSWindowDelegate {
     private let onInstallUpdate: () -> Void
     private let paletteAccessoryController = NSTitlebarAccessoryViewController()
     private weak var updateButton: UpdateTitlebarButton?
-    private var workspaceLayoutCancellable: AnyCancellable?
 
     init(
         shortcutSettings: KeyboardShortcutSettings,
@@ -50,11 +48,6 @@ final class ColermWindowController: NSWindowController, NSWindowDelegate {
             window.center()
         } else {
             ensureMinimumWindowFrame()
-        }
-        workspaceLayoutCancellable = workspaceLayoutSettings.$isVerticalTabsEnabled.sink { [weak self] _ in
-            DispatchQueue.main.async {
-                self?.ensureMinimumWindowFrame()
-            }
         }
         installPaletteTitlebarAccessory(in: window)
     }

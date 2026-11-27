@@ -20,7 +20,7 @@ final class WorkspaceViewController: NSViewController {
     private let pagerController: ColumnPagerController
     private let sidebarResizeHandle = WorkspaceSidebarResizeHandle(frame: .zero)
     private lazy var tabBarView: NSHostingView<WorkspaceTabBarView> = {
-        NSHostingView(
+        let hostingView = NSHostingView(
             rootView: WorkspaceTabBarView(
                 store: store,
                 layoutSettings: workspaceLayoutSettings,
@@ -29,6 +29,10 @@ final class WorkspaceViewController: NSViewController {
                 }
             )
         )
+        // AppKit sizes the tab bar in both orientations. SwiftUI's size constraints
+        // can resize the window while the tab bar is switching orientations.
+        hostingView.sizingOptions = []
+        return hostingView
     }()
     private let footerView: NSHostingView<WorkspaceFooterView>
     private var storeCancellable: AnyCancellable?
@@ -102,7 +106,7 @@ final class WorkspaceViewController: NSViewController {
             tabBarView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             tabBarView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             tabBarView.topAnchor.constraint(equalTo: view.topAnchor),
-            tabBarView.heightAnchor.constraint(equalToConstant: 36)
+            tabBarView.heightAnchor.constraint(equalToConstant: WorkspaceLayoutMetrics.tabHeight)
         ]
         let verticalTabBarWidthConstraint = tabBarView.widthAnchor.constraint(
             equalToConstant: workspaceLayoutSettings.verticalTabsWidth
