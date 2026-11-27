@@ -257,13 +257,14 @@ private struct WorkspaceTab: View {
                         .layoutPriority(-1)
                 }
 
+                Spacer(minLength: 8)
+
                 if let agentStatus = session.agentStatus, agentStatus.isVisibleInTab {
                     AgentStatusBadge(status: agentStatus)
                 }
-
-                Spacer(minLength: 26)
             }
-            .padding(.horizontal, 18)
+            .padding(.leading, 18)
+            .padding(.trailing, 36)
             .frame(
                 minWidth: isVertical ? 0 : 170,
                 maxWidth: isVertical ? .infinity : nil,
