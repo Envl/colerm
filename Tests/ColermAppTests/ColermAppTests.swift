@@ -2351,6 +2351,161 @@ final class ColermAppTests: XCTestCase {
         channel.stop()
         XCTAssertFalse(FileManager.default.fileExists(atPath: statusDir))
     }
+
+    @MainActor
+    func testAGYBackgroundTasksAndLongPulsingTurnsStayRunningUntilCleanIdleComposer() {
+        var tracker = AgentActivityTracker()
+        let agyIdleObs = AgentProcessObservation(
+            agent: .agy,
+            rootPID: 48156,
+            startsWorkingImmediately: false,
+            totalCPUNanoseconds: 100_000_000,
+            nonAgentChildren: []
+        )
+        let idleComposer = TerminalViewportSnapshot.from(lines: [
+            "────────────────────────────────────────────────────────────────",
+            "> █",
+            "────────────────────────────────────────────────────────────────",
+            "? for shortcuts   auto · Gemini 4 Carbon · high"
+        ])
+        _ = tracker.poll(observation: agyIdleObs, viewport: idleComposer, isTabSelected: false, now: 100.0)
+        XCTAssertEqual(tracker.status, AgentSessionStatus(agent: .agy, phase: .idle))
+
+        // 1. User submits prompt -> AGY thinks with 2-frame pulse (● <-> ○) and OSC 9;4;3 for >30s
+        _ = tracker.handleUserInput(.typing, now: 110.0)
+        _ = tracker.handleUserInput(.submit, now: 110.2)
+        _ = tracker.handleProgressReport(.active, isTabSelected: false, now: 110.4)
+
+        let activeTurnPulseA = TerminalViewportSnapshot.from(lines: [
+            "● Running (xcodebuild -scheme CapyInput -p...) (ctrl+o to expand)",
+            "────────────────────────────────────────────────────────────────",
+            "esc to cancel                 auto · Gemini 4 Neon · high"
+        ])
+        let activeTurnPulseB = TerminalViewportSnapshot.from(lines: [
+            "○ Running (xcodebuild -scheme CapyInput -p...) (ctrl+o to expand)",
+            "────────────────────────────────────────────────────────────────",
+            "esc to cancel                 auto · Gemini 4 Neon · high"
+        ])
+        for step in 0 ..< 70 {
+            let frame = step.isMultiple(of: 2) ? activeTurnPulseA : activeTurnPulseB
+            _ = tracker.poll(
+                observation: agyIdleObs,
+                viewport: frame,
+                isTabSelected: false,
+                now: 111.0 + Double(step) * 0.5
+            )
+            XCTAssertEqual(
+                tracker.status,
+                AgentSessionStatus(agent: .agy, phase: .running),
+                "Active AGY turn must stay Running across long 2-frame pulse (step \(step))"
+            )
+        }
+
+        // 2. AGY yields turn while a background command (0% CPU xcodebuild waiting on Simulator) runs,
+        //    emits OSC 9;4;0, and renders the pinned background task shelf + `1 task(s) · /tasks` footer.
+        let bgTaskChildObs = AgentProcessObservation(
+            agent: .agy,
+            rootPID: 48156,
+            startsWorkingImmediately: false,
+            totalCPUNanoseconds: 105_000_000,
+            nonAgentChildren: [
+                AgentChildProcessObservation(pid: 36972, totalCPUNanoseconds: 10_000_000, isHelperDaemon: false)
+            ]
+        )
+        let bgTaskPulseA = TerminalViewportSnapshot.from(lines: [
+            "○ Running (xcodebuild -scheme CapyInput -p...) (ctrl+o to expand)",
+            "Running a UI test reproduction of the back-and-forth swipe deletion.",
+            "────────────────────────────────────────────────────────────────",
+            "> █",
+            "────────────────────────────────────────────────────────────────",
+            "  ● [18:40:05] xcodebuild -scheme CapyInput -project Capy... running",
+            "────────────────────────────────────────────────────────────────",
+            "? for shortcuts   auto · Gemini 4 Neon · high · 1 task(s) · /tasks"
+        ])
+        let bgTaskPulseB = TerminalViewportSnapshot.from(lines: [
+            "○ Running (xcodebuild -scheme CapyInput -p...) (ctrl+o to expand)",
+            "Running a UI test reproduction of the back-and-forth swipe deletion.",
+            "────────────────────────────────────────────────────────────────",
+            "> █",
+            "────────────────────────────────────────────────────────────────",
+            "  ○ [18:40:05] xcodebuild -scheme CapyInput -project Capy... running",
+            "────────────────────────────────────────────────────────────────",
+            "? for shortcuts   auto · Gemini 4 Neon · high · 1 task(s) · /tasks"
+        ])
+
+        XCTAssertTrue(AgentViewportAnalyzer.hasActiveBackgroundTaskIndicator(in: bgTaskPulseA.tailLines))
+        XCTAssertTrue(AgentViewportAnalyzer.hasExplicitBusyIndicator(in: bgTaskPulseA.tailLines))
+        XCTAssertFalse(AgentViewportAnalyzer.hasIdleComposerFooter(in: bgTaskPulseA.tailLines))
+
+        // Narrow column where `/tasks` is truncated off the footer still detects the shelf row
+        let narrowBgTaskFrame = TerminalViewportSnapshot.from(lines: [
+            "> █",
+            "────────────────────────────────────────",
+            "  ● [18:40:02] set -euo pipefail echo \"=== 1. Clean & Deb... running",
+            "────────────────────────────────────────",
+            "? for shortcuts   auto · Gemini 4 Carbon"
+        ])
+        XCTAssertTrue(AgentViewportAnalyzer.hasActiveBackgroundTaskIndicator(in: narrowBgTaskFrame.tailLines))
+        XCTAssertFalse(AgentViewportAnalyzer.hasIdleComposerFooter(in: narrowBgTaskFrame.tailLines))
+
+        // First poll observes the background task + child, then OSC 9;4;0 fires when turn yields
+        _ = tracker.poll(observation: bgTaskChildObs, viewport: bgTaskPulseA, isTabSelected: false, now: 146.0)
+        _ = tracker.handleProgressReport(.remove, isTabSelected: false, now: 146.7)
+        XCTAssertEqual(tracker.status, AgentSessionStatus(agent: .agy, phase: .running))
+
+        // Over 90 seconds of 0% CPU xcodebuild waiting on Simulator with 2-frame pulsing must STAY Running
+        for step in 0 ..< 180 {
+            let frame = step.isMultiple(of: 2) ? bgTaskPulseA : bgTaskPulseB
+            _ = tracker.poll(
+                observation: bgTaskChildObs,
+                viewport: frame,
+                isTabSelected: false,
+                now: 147.0 + Double(step) * 0.5
+            )
+            XCTAssertEqual(
+                tracker.status,
+                AgentSessionStatus(agent: .agy, phase: .running),
+                "AGY waiting on background task must stay Running past transientToolSilenceLimit (step \(step))"
+            )
+        }
+
+        // 3. Background task finishes -> clean idle composer returns -> settles to Done on background tab
+        _ = tracker.poll(observation: agyIdleObs, viewport: idleComposer, isTabSelected: false, now: 237.0)
+        _ = tracker.poll(observation: agyIdleObs, viewport: idleComposer, isTabSelected: false, now: 238.0)
+        _ = tracker.poll(observation: agyIdleObs, viewport: idleComposer, isTabSelected: false, now: 239.2)
+        XCTAssertEqual(tracker.status, AgentSessionStatus(agent: .agy, phase: .done))
+
+        // 4. Attaching fresh to an AGY session that already has a running background task enters Running immediately
+        var attachedTracker = AgentActivityTracker()
+        _ = attachedTracker.poll(observation: bgTaskChildObs, viewport: bgTaskPulseA, isTabSelected: true, now: 300.0)
+        XCTAssertEqual(attachedTracker.status, AgentSessionStatus(agent: .agy, phase: .running))
+
+        // 5. Helper daemon classification ignores shell `-c` script bodies mentioning `antigravity` or `mcp`
+        XCTAssertFalse(
+            SystemAgentProcessInspector.isHelperDaemon(
+                executablePath: "/opt/homebrew/Cellar/zsh/5.9/bin/zsh",
+                arguments: ["zsh", "-c", "rg antigravity Sources/ && echo mcp"]
+            )
+        )
+        XCTAssertFalse(
+            SystemAgentProcessInspector.isHelperDaemon(
+                executablePath: "/Applications/Xcode.app/Contents/Developer/usr/bin/xcodebuild",
+                arguments: ["xcodebuild", "-scheme", "CapyInput", "test"]
+            )
+        )
+        XCTAssertTrue(
+            SystemAgentProcessInspector.isHelperDaemon(
+                executablePath: "/opt/homebrew/bin/node",
+                arguments: ["node", "/Users/dev/mcp-server/dist/index.js"]
+            )
+        )
+        XCTAssertTrue(
+            SystemAgentProcessInspector.isHelperDaemon(
+                executablePath: "/Users/dev/.local/bin/antigravity-language-server",
+                arguments: ["antigravity-language-server"]
+            )
+        )
+    }
 }
 
 @MainActor

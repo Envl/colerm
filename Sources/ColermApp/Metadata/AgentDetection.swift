@@ -956,11 +956,47 @@ enum AgentViewportAnalyzer {
         "[y/n]", "(y/n)", "[y/n/a]", "(y/n/a)", "[yes/no]", "(yes/no)"
     ]
 
+    private static let taskRowLeadingGlyphs: Set<UnicodeScalar> = [
+        "●", "○", "◉", "◐", "◑", "◒", "◓"
+    ]
+
+    static func hasActiveBackgroundTaskIndicator(in tailLines: [String]) -> Bool {
+        if detectedBlockedKind(in: tailLines) != nil {
+            return false
+        }
+        let meaningful = nonSeparatorTailLines(from: tailLines)
+        guard !meaningful.isEmpty else { return false }
+
+        // AGY status bar summary when background tasks are running, e.g.:
+        // `? for shortcuts   auto · Gemini 4 Carbon · high · 1 task(s) · /tasks`
+        for line in meaningful.suffix(2) {
+            if containsActiveTaskCountSummary(line.lowercased()) {
+                return true
+            }
+        }
+
+        // AGY background task shelf rows pinned below the composer, e.g.:
+        // `● [18:40:02] set -euo pipefail echo "=== 1. Clean & Deb... running`
+        for line in meaningful.suffix(5) {
+            if isActiveBackgroundTaskRow(line) {
+                return true
+            }
+        }
+
+        return false
+    }
+
     static func hasExplicitBusyIndicator(in tailLines: [String]) -> Bool {
         if detectedBlockedKind(in: tailLines) != nil {
             return false
         }
-        for line in tailLines.suffix(6) {
+        if hasActiveBackgroundTaskIndicator(in: tailLines) {
+            return true
+        }
+        if hasIdleComposerFooter(in: tailLines) {
+            return false
+        }
+        for line in nonSeparatorTailLines(from: tailLines).suffix(6) {
             let lowered = line.lowercased()
             if busyPhrases.contains(where: { lowered.contains($0) }) {
                 return true
@@ -970,7 +1006,10 @@ enum AgentViewportAnalyzer {
     }
 
     static func hasIdleComposerFooter(in tailLines: [String]) -> Bool {
-        let footerLines = tailLines.suffix(4).map { $0.lowercased() }
+        if hasActiveBackgroundTaskIndicator(in: tailLines) {
+            return false
+        }
+        let footerLines = nonSeparatorTailLines(from: tailLines).suffix(4).map { $0.lowercased() }
         guard !footerLines.isEmpty else { return false }
         if hasInteractivePromptFooter(in: footerLines) {
             return false
@@ -1091,6 +1130,72 @@ enum AgentViewportAnalyzer {
         let candidate = String(trimmed)
         return yesNoSuffixes.contains(where: { candidate.hasSuffix($0) })
     }
+
+    private static func nonSeparatorTailLines(from tailLines: [String]) -> [String] {
+        tailLines.filter { !isBoxDrawingSeparatorLine($0) }
+    }
+
+    private static func isBoxDrawingSeparatorLine(_ line: String) -> Bool {
+        let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return true }
+        return trimmed.unicodeScalars.allSatisfy { scalar in
+            if scalar.value >= 0x2500 && scalar.value <= 0x257F {
+                return true
+            }
+            return scalar == "-" || scalar == "=" || scalar == "_"
+        }
+    }
+
+    private static func containsActiveTaskCountSummary(_ loweredLine: String) -> Bool {
+        guard loweredLine.contains("/tasks") else { return false }
+        var searchStart = loweredLine.startIndex
+        while let range = loweredLine.range(of: " task(s)", range: searchStart..<loweredLine.endIndex) {
+            var digitStart = range.lowerBound
+            while digitStart > loweredLine.startIndex {
+                let prev = loweredLine.index(before: digitStart)
+                let ch = loweredLine[prev]
+                if ch.isASCII && ch.isNumber {
+                    digitStart = prev
+                } else {
+                    break
+                }
+            }
+            if digitStart < range.lowerBound,
+               let count = Int(loweredLine[digitStart..<range.lowerBound]),
+               count > 0 {
+                return true
+            }
+            searchStart = range.upperBound
+        }
+        return false
+    }
+
+    private static func isActiveBackgroundTaskRow(_ line: String) -> Bool {
+        let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let first = trimmed.unicodeScalars.first else { return false }
+        let isLeadingStatusGlyph = taskRowLeadingGlyphs.contains(first)
+            || (first.value >= 0x2801 && first.value <= 0x28FF)
+        guard isLeadingStatusGlyph else { return false }
+        guard trimmed.lowercased().hasSuffix(" running") else { return false }
+
+        let afterGlyph = trimmed[trimmed.index(after: trimmed.startIndex)...]
+            .drop(while: { $0 == " " || $0 == "\t" })
+        return hasLeadingBracketedTimestamp(afterGlyph)
+    }
+
+    private static func hasLeadingBracketedTimestamp(_ text: Substring) -> Bool {
+        // Matches `[HH:MM:SS]`
+        let chars = Array(text.prefix(10))
+        guard chars.count == 10,
+              chars[0] == "[",
+              chars[3] == ":",
+              chars[6] == ":",
+              chars[9] == "]"
+        else {
+            return false
+        }
+        return [1, 2, 4, 5, 7, 8].allSatisfy { chars[$0].isASCII && chars[$0].isNumber }
+    }
 }
 
 struct AgentChildProcessObservation: Equatable, Sendable {
@@ -1116,8 +1221,6 @@ struct AgentActivityTracker {
     static let unconfirmedEmptySubmitTimeout: TimeInterval = 1.5
     static let unconfirmedPromptSubmitTimeout: TimeInterval = 3.0
     static let transientToolSilenceLimit: TimeInterval = 8.0
-    static let busyBannerStaticLimit: TimeInterval = 10.0
-    static let progressReportStaticLimit: TimeInterval = 3.0
     static let recentHistoryCapacity = 6
     static let heavyAgentCPUNanosThreshold: UInt64 = 40_000_000 // ~8% of one core over 0.5s
     static let heavyChildCPUNanosThreshold: UInt64 = 80_000_000 // ~16% of one core over 0.5s
@@ -1151,8 +1254,11 @@ struct AgentActivityTracker {
 
     private var previousTotalCPUNanos: UInt64?
     private var childFirstSeenAt: [pid_t: TimeInterval] = [:]
+    private var childLastActiveAt: [pid_t: TimeInterval] = [:]
     private var childPreviousCPUNanos: [pid_t: UInt64] = [:]
     private var baselineChildPIDs: Set<pid_t> = []
+    private var lastPollHadActiveToolChild = false
+    private var lastPollHadActiveBackgroundTask = false
 
     private var lastTitle: String?
     private var lastSpinnerFrame: UnicodeScalar?
@@ -1375,10 +1481,10 @@ struct AgentActivityTracker {
 
         switch progress {
         case .active:
-            isProgressActive = true
             if let current = status,
                isAgentProcessAlive,
                (!inBootWindow || current.phase == .running || current.phase.isBlocked) {
+                isProgressActive = true
                 isExplicitlyBlocked = false
                 status = AgentSessionStatus(agent: current.agent, phase: .running)
                 turnConfirmed = true
@@ -1395,6 +1501,8 @@ struct AgentActivityTracker {
                    current.phase == .running,
                    turnConfirmed,
                    !isHeadlessRun,
+                   !lastPollHadActiveToolChild,
+                   !lastPollHadActiveBackgroundTask,
                    now - lastWorkSignalAt >= Self.hintedSettleInterval {
                     completeRunningTurn(for: current.agent, isTabSelected: isTabSelected)
                 }
@@ -1589,12 +1697,22 @@ struct AgentActivityTracker {
             for child in observation.nonAgentChildren {
                 baselineChildPIDs.insert(child.pid)
                 childFirstSeenAt[child.pid] = now
+                childLastActiveAt[child.pid] = now
                 childPreviousCPUNanos[child.pid] = child.totalCPUNanoseconds
             }
             if let viewport {
                 lastObservedViewportHash = viewport.contentHash
                 recordViewportHash(viewport.contentHash)
                 hasInitializedViewport = true
+                let hasActiveBackgroundTask = AgentViewportAnalyzer.hasActiveBackgroundTaskIndicator(
+                    in: viewport.tailLines
+                )
+                lastPollHadActiveBackgroundTask = hasActiveBackgroundTask
+                if hasActiveBackgroundTask, status?.phase == .idle {
+                    status = AgentSessionStatus(agent: observation.agent, phase: .running)
+                    turnConfirmed = true
+                    lastWorkSignalAt = now
+                }
             }
             return status != previous
         }
@@ -1623,6 +1741,7 @@ struct AgentActivityTracker {
 
         // 1. Evaluate active-screen text changes & interactive prompts (immune to cursor blink & scrollback)
         var autonomousNovelViewportChange = false
+        var hasActiveBackgroundTask = false
         var hasExplicitBusyBanner = false
         var detectedBlockedKind: AgentBlockedKind?
         var hasIdleComposerFooter = false
@@ -1634,6 +1753,8 @@ struct AgentActivityTracker {
             if viewport.contentHash != dismissedBlockedViewportHash {
                 detectedBlockedKind = AgentViewportAnalyzer.detectedBlockedKind(in: viewport.tailLines)
             }
+            hasActiveBackgroundTask = (detectedBlockedKind == nil)
+                && AgentViewportAnalyzer.hasActiveBackgroundTaskIndicator(in: viewport.tailLines)
             hasIdleComposerFooter = AgentViewportAnalyzer.hasIdleComposerFooter(in: viewport.tailLines)
             hasExplicitBusyBanner = (detectedBlockedKind == nil)
                 && AgentViewportAnalyzer.hasExplicitBusyIndicator(in: viewport.tailLines)
@@ -1661,15 +1782,18 @@ struct AgentActivityTracker {
         // 3. Evaluate transient tool subprocesses (ignoring startup/MCP/LSP/sidecar helpers)
         let activeChildIDs = Set(observation.nonAgentChildren.map(\.pid))
         childFirstSeenAt = childFirstSeenAt.filter { activeChildIDs.contains($0.key) }
+        childLastActiveAt = childLastActiveAt.filter { activeChildIDs.contains($0.key) }
         childPreviousCPUNanos = childPreviousCPUNanos.filter { activeChildIDs.contains($0.key) }
         baselineChildPIDs = baselineChildPIDs.intersection(activeChildIDs)
 
         let turnFloor = lastUserSubmitAt ?? agentDetectedAt
+        let hasActiveViewportWork = hasExplicitBusyBanner || hasActiveBackgroundTask
         var hasActiveTransientToolChild = false
         for child in observation.nonAgentChildren {
             let firstSeen = childFirstSeenAt[child.pid] ?? now
             if childFirstSeenAt[child.pid] == nil {
                 childFirstSeenAt[child.pid] = now
+                childLastActiveAt[child.pid] = now
                 if inBootWindow || child.isHelperDaemon || firstSeen < turnFloor {
                     baselineChildPIDs.insert(child.pid)
                 }
@@ -1682,32 +1806,38 @@ struct AgentActivityTracker {
             childPreviousCPUNanos[child.pid] = child.totalCPUNanoseconds
 
             if !child.isHelperDaemon, childCPUDelta >= Self.heavyChildCPUNanosThreshold {
+                childLastActiveAt[child.pid] = now
                 hasActiveTransientToolChild = true
             } else if !baselineChildPIDs.contains(child.pid) {
-                if (now - firstSeen) < Self.transientToolSilenceLimit {
+                if hasActiveViewportWork {
+                    childLastActiveAt[child.pid] = now
+                    hasActiveTransientToolChild = true
+                } else if (now - (childLastActiveAt[child.pid] ?? firstSeen)) < Self.transientToolSilenceLimit {
                     hasActiveTransientToolChild = true
                 } else {
                     baselineChildPIDs.insert(child.pid)
                 }
             }
         }
+        lastPollHadActiveToolChild = hasActiveTransientToolChild
+        lastPollHadActiveBackgroundTask = hasActiveBackgroundTask
 
-        // 4. Evaluate title spinner & OSC 9;4 progress with staleness bounds
+        // 4. Evaluate title spinner, active busy banners, and OSC 9;4 progress.
+        //    Do not expire active busy banners or OSC 9;4 progress during long silent/2-frame-pulsing
+        //    waits; clear stale OSC 9;4 progress immediately once an idle composer footer returns.
         let hasRecentTitleSpinner = lastSpinnerAnimationAt.map { (now - $0) <= 1.0 } ?? false
-        let hasFreshBusyBanner = hasExplicitBusyBanner
-            && (now - lastNovelScreenOrStartAt) <= Self.busyBannerStaticLimit
-        let hasFreshProgress = isProgressActive
-            && (now - lastNovelScreenOrStartAt) <= Self.progressReportStaticLimit
-        if isProgressActive && !hasFreshProgress {
+        if isProgressActive && hasIdleComposerFooter {
             isProgressActive = false
         }
+        let hasLiveBusyBanner = hasExplicitBusyBanner
+        let hasLiveProgress = isProgressActive && !hasIdleComposerFooter && detectedBlockedKind == nil
 
         let fallbackCPUWork = (viewport == nil) && hasHeavyAgentCPU && !isRecentTypingWindow && !inBootWindow
         let isRunningKeepAlive = autonomousNovelViewportChange
-            || hasFreshBusyBanner
+            || hasLiveBusyBanner
             || hasActiveTransientToolChild
             || hasRecentTitleSpinner
-            || hasFreshProgress
+            || hasLiveProgress
             || fallbackCPUWork
 
         guard let current = status else { return false }
@@ -1743,7 +1873,13 @@ struct AgentActivityTracker {
 
             // Entering `.running` from idle/done requires a positive work signal — never bare
             // screen diffs alone (which false-trigger on TUI scrolling, resizing, or status ticks).
-            if hasExplicitBusyBanner && autonomousNovelViewportChange && !isRecentInteractionWindow {
+            if hasActiveBackgroundTask && !isRecentInteractionWindow {
+                status = AgentSessionStatus(agent: current.agent, phase: .running)
+                turnConfirmed = true
+                lastWorkSignalAt = now
+                lastCompletionHintAt = nil
+                consecutiveWorkTicks = 0
+            } else if hasExplicitBusyBanner && autonomousNovelViewportChange && !isRecentInteractionWindow {
                 status = AgentSessionStatus(agent: current.agent, phase: .running)
                 turnConfirmed = true
                 lastWorkSignalAt = now
@@ -1775,7 +1911,7 @@ struct AgentActivityTracker {
             }
 
         case .needsInput(let currentKind):
-            if hasActiveTransientToolChild || hasRecentTitleSpinner || hasFreshProgress || (hasFreshBusyBanner && !isRecentInteractionWindow) {
+            if hasActiveTransientToolChild || hasRecentTitleSpinner || hasLiveProgress || (hasLiveBusyBanner && !isRecentInteractionWindow) {
                 isExplicitlyBlocked = false
                 status = AgentSessionStatus(agent: current.agent, phase: .running)
                 turnConfirmed = true
@@ -1928,8 +2064,11 @@ struct AgentActivityTracker {
         dismissedBlockedViewportHash = nil
         previousTotalCPUNanos = nil
         childFirstSeenAt.removeAll()
+        childLastActiveAt.removeAll()
         childPreviousCPUNanos.removeAll()
         baselineChildPIDs.removeAll()
+        lastPollHadActiveToolChild = false
+        lastPollHadActiveBackgroundTask = false
         lastSpinnerFrame = nil
         lastSpinnerAnimationAt = nil
         spinnerFrameTransitions = 0

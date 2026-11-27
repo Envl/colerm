@@ -19,9 +19,18 @@ final class SystemAgentProcessInspector: AgentProcessInspecting {
         let isHelperDaemon: Bool
     }
 
-    private static let maxVisitedProcesses = 24
-    private static let maxTreeDepth = 3
+    private static let maxVisitedProcesses = 64
+    private static let maxTreeDepth = 6
     private static let maxCacheEntries = 256
+
+    private static let shellNames: Set<String> = [
+        "sh", "bash", "zsh", "dash", "fish", "ksh", "tcsh", "csh"
+    ]
+
+    private static let helperInspectableRunners: Set<String> = [
+        "bun", "bunx", "deno", "dlx", "env", "java", "node", "nodejs",
+        "npx", "pnpx", "python", "python3", "ruby", "ts-node", "tsx", "uv"
+    ]
 
     private static let helperDaemonMarkers: [String] = [
         "mcp",
@@ -67,6 +76,7 @@ final class SystemAgentProcessInspector: AgentProcessInspecting {
 
             guard visitedPIDs.insert(current.pid).inserted else { continue }
             guard let bsdInfo = Self.readBSDInfo(pid: current.pid) else { continue }
+            guard bsdInfo.pbi_status != UInt32(SZOMB) else { continue }
 
             let identity = resolveIdentity(pid: current.pid, bsdInfo: bsdInfo)
             visited.append(
@@ -143,24 +153,24 @@ final class SystemAgentProcessInspector: AgentProcessInspecting {
         }
 
         let match: AgentCommandMatch?
-        let combinedLower: String
+        let isHelper: Bool
         if let procArgs = Self.readProcessArguments(pid: pid) {
             match = AgentCommandMatcher.match(
                 executablePath: procArgs.executablePath,
                 arguments: procArgs.arguments
             )
-            combinedLower = ([procArgs.executablePath] + procArgs.arguments)
-                .joined(separator: " ")
-                .lowercased()
+            isHelper = Self.isHelperDaemon(
+                executablePath: procArgs.executablePath,
+                arguments: procArgs.arguments
+            )
         } else {
             let execPath = Self.readProcessPath(pid: pid) ?? ""
             let fallbackName = Self.processName(from: bsdInfo)
             let args = fallbackName.isEmpty ? [] : [fallbackName]
             match = AgentCommandMatcher.match(executablePath: execPath, arguments: args)
-            combinedLower = "\(execPath) \(fallbackName)".lowercased()
+            isHelper = Self.isHelperDaemon(executablePath: execPath, arguments: args)
         }
 
-        let isHelper = Self.helperDaemonMarkers.contains { combinedLower.contains($0) }
         let resolved = CachedIdentity(match: match, isHelperDaemon: isHelper)
 
         if identityCache.count >= Self.maxCacheEntries {
@@ -168,6 +178,47 @@ final class SystemAgentProcessInspector: AgentProcessInspecting {
         }
         identityCache[key] = resolved
         return resolved
+    }
+
+    static func isHelperDaemon(executablePath: String, arguments: [String]) -> Bool {
+        let loweredExec = executablePath.lowercased()
+        if helperDaemonMarkers.contains(where: { loweredExec.contains($0) }) {
+            return true
+        }
+
+        let execBase = basename(of: loweredExec)
+        let arg0Base = arguments.first.map { basename(of: $0.lowercased()) } ?? ""
+
+        // Never inspect shell `-c` script bodies for helper markers; if a shell spawns
+        // an actual MCP/LSP daemon, that child process matches on its own executable/entrypoint.
+        if shellNames.contains(execBase) || (execBase.isEmpty && shellNames.contains(arg0Base)) {
+            return false
+        }
+
+        guard helperInspectableRunners.contains(execBase)
+            || helperInspectableRunners.contains(arg0Base)
+        else {
+            if let arg0 = arguments.first?.lowercased() {
+                return helperDaemonMarkers.contains(where: { arg0.contains($0) })
+            }
+            return false
+        }
+
+        for arg in arguments.prefix(8) {
+            let lowered = arg.lowercased()
+            if helperDaemonMarkers.contains(where: { lowered.contains($0) }) {
+                return true
+            }
+        }
+        return false
+    }
+
+    private static func basename(of path: String) -> String {
+        guard !path.isEmpty else { return "" }
+        if let slash = path.lastIndex(of: "/") {
+            return String(path[path.index(after: slash)...])
+        }
+        return path
     }
 
     private static func readBSDInfo(pid: pid_t) -> proc_bsdinfo? {
